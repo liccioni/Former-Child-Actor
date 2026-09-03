@@ -27,7 +27,7 @@ framework-core       The actor runtime: Actor, ActorRef, ActorSystem, Mailbox, D
 framework-testkit     Minimal test support for asserting on actor behavior.
 examples/hello-world  The smallest complete application.
 examples/ping-pong    Two actors exchanging messages, each holding its own state.
-benchmarks            JMH benchmark suite (scaffolded; implemented starting M3).
+benchmarks            JMH benchmark suite (M3). See benchmarks/README.md to run it.
 docs/decisions        Architecture Decision Records (ADRs).
 ```
 
