@@ -32,12 +32,23 @@ An actor is addressed only through an `ActorRef<T>` — a stable, thread-safe ha
 ## 3. Concurrency guarantees
 
 At most one invocation of `Actor.onMessage` (and `preStart`/`postStop`) runs at any instant for
-a given actor instance. This is currently achieved with the simplest possible mechanism: **each
-actor owns a single dedicated virtual thread for its entire lifetime**, and that thread is the
-only thread that ever calls into the actor's code. See `Dispatcher` and ADR-002.
+a given actor instance. This is achieved with the simplest possible mechanism: **each actor owns
+a single dedicated virtual thread for its entire lifetime**, and that thread is the only thread
+that ever calls into the actor's code. See `Dispatcher` and ADR-002.
 
-This is a full concurrency proof only informally, for M1. A rigorous Java Memory Model review is
-scheduled for M2 (TASK-207).
+**Java Memory Model review (TASK-207):** because all of an actor's own state is touched only by
+that one thread, visibility across messages is plain program order — no synchronization is
+needed for actor-owned fields. The one real cross-thread boundary is the mailbox: its lock gives
+the happens-before edge that makes state a sender established before calling `tell()` visible
+inside `onMessage`, and this same edge underlies the ordering guarantees in ADR-003 and the
+lifecycle semantics in ADR-004. Lifecycle flags (`terminated`, `stopRequested`,
+`shuttingDown`) are `AtomicBoolean`, and the actor registry is a `ConcurrentHashMap`; both give
+their own documented cross-thread guarantees. Safe publication of a newly spawned actor to its
+dispatcher thread relies on `final` fields plus the JMM's documented happens-before edge for
+`Executor.execute()`. The one real pitfall is caller-side: mutating a message object *after*
+calling `tell()` is unguarded shared mutable state, same as anywhere else in Java — treat a
+message as handed off, not shared, once sent. Full derivation in
+`docs/decisions/ADR-005-jmm-review-sequential-processing.md`.
 
 ## 4. Mailbox
 

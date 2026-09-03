@@ -5,7 +5,15 @@ package dev.actorframework.core;
  *
  * <p>An actor never has two invocations of {@link #onMessage} running concurrently for the same
  * instance; the runtime guarantees at most one in-flight message per actor (TASK-106). Actor state
- * may therefore be held in plain (non-volatile, non-synchronized) fields.
+ * may therefore be held in plain (non-volatile, non-synchronized) fields — see the Java Memory
+ * Model review in {@code docs/decisions/ADR-005-jmm-review-sequential-processing.md} (TASK-207) for
+ * why this holds.
+ *
+ * <p><b>Do not mutate a message after sending it.</b> The mailbox guarantees that state a sender
+ * established <em>before</em> calling {@link ActorRef#tell} is visible inside {@link #onMessage}
+ * when that message is processed; it makes no guarantee about further mutation of a message object
+ * after {@code tell()} returns. Treat a message as handed off, not shared, once sent — prefer
+ * immutable messages (records are a natural fit).
  */
 public interface Actor<T> {
 
