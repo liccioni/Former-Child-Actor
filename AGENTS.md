@@ -12,6 +12,13 @@ The guiding rule: **complexity is added because the application needs it, not be
 framework requires it.** Do not add features, abstractions, or configuration knobs ahead of the
 milestone that actually needs them.
 
+## Git workflow
+
+* No direct pushes to `main` — it's branch-protected (required PR, required passing CI, no force
+  pushes/deletions, enforced even for admins). Every change, including small docs fixes, goes
+  through a feature branch and a pull request.
+* CI (`.github/workflows/ci.yml`, TASK-002) must be green before a PR can merge.
+
 ## Module boundaries
 
 * `framework-core` — the actor runtime. No dependency on any other module in this repo. Keep it
