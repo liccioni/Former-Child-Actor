@@ -18,6 +18,13 @@ import java.util.concurrent.locks.ReentrantLock;
  * what gives the runtime its sequential-processing guarantee (TASK-106); this class does not itself
  * enforce single-consumer usage.
  *
+ * <p><b>Cross-sender ordering (TASK-201):</b> if one {@link #offer} call returns before another
+ * begins, with a real happens-before relationship between the two callers, the first is enqueued
+ * before the second. Calls with no such relationship have unspecified relative order. When the
+ * mailbox is full, senders already blocked in {@link #offer} are admitted before a sender that
+ * arrives later, once space frees up. See {@code
+ * docs/decisions/ADR-003-cross-sender-mailbox-ordering.md}.
+ *
  * <p>Ownership: a {@code Mailbox} is owned by exactly one {@link ActorCell} for its entire lifetime
  * and is never shared between actors.
  */
@@ -28,7 +35,11 @@ final class Mailbox<T> {
 
   private final ArrayDeque<T> queue;
   private final int capacity;
-  private final ReentrantLock lock = new ReentrantLock();
+
+  // Fair (TASK-201, ADR-003): guarantees that a sender already blocked in offer() is admitted
+  // before one that arrives later, once space frees up. A non-fair lock lets a fresh caller
+  // barge ahead of an already-signaled waiter still reacquiring the lock.
+  private final ReentrantLock lock = new ReentrantLock(true);
   private final Condition notFull = lock.newCondition();
   private final Condition notEmpty = lock.newCondition();
   private boolean closed = false;

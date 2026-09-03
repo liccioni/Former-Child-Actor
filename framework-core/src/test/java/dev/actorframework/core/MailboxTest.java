@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
@@ -118,5 +120,101 @@ class MailboxTest {
   void rejectsNonPositiveCapacity() {
     org.junit.jupiter.api.Assertions.assertThrows(
         IllegalArgumentException.class, () -> new Mailbox<String>(0));
+  }
+
+  // TASK-201 (ADR-003): cross-sender ordering guarantees.
+
+  @Test
+  void enqueuesInHappensBeforeOrderAcrossSenders() throws InterruptedException {
+    Mailbox<String> mailbox = new Mailbox<>(16);
+    CountDownLatch firstReturned = new CountDownLatch(1);
+
+    Thread sender1 =
+        new Thread(
+            () -> {
+              mailbox.offer("first");
+              firstReturned.countDown();
+            });
+    sender1.start();
+    // sender1's tell() has returned before sender2's begins: a real happens-before relationship.
+    firstReturned.await();
+
+    Thread sender2 = new Thread(() -> mailbox.offer("second"));
+    sender2.start();
+
+    sender1.join(Duration.ofSeconds(2).toMillis());
+    sender2.join(Duration.ofSeconds(2).toMillis());
+
+    assertEquals("first", mailbox.take());
+    assertEquals("second", mailbox.take());
+  }
+
+  @Test
+  void admitsASenderThatIsAlreadyBlockedBeforeALaterArrival() throws InterruptedException {
+    for (int iteration = 0; iteration < 30; iteration++) {
+      Mailbox<String> mailbox = new Mailbox<>(1);
+      assertTrue(mailbox.offer("seed"));
+
+      List<String> admissionOrder = new CopyOnWriteArrayList<>();
+      CountDownLatch earlyStarted = new CountDownLatch(1);
+      Thread early =
+          new Thread(
+              () -> {
+                earlyStarted.countDown();
+                mailbox.offer("early");
+                admissionOrder.add("early");
+              });
+      early.start();
+      earlyStarted.await();
+      waitUntilBlocked(early);
+
+      // 'late' is pre-warmed and hot-spinning on a plain volatile read, so it can attempt the
+      // lock within nanoseconds of 'go' flipping — unlike 'early', which needs a real OS-level
+      // unpark-and-reschedule to reacquire the lock after being signaled. Without that head
+      // start, thread startup latency alone lets 'early' win even with a non-fair lock, masking
+      // the barging bug this test exists to catch.
+      AtomicBoolean go = new AtomicBoolean(false);
+      CountDownLatch lateSpinning = new CountDownLatch(1);
+      Thread late =
+          new Thread(
+              () -> {
+                lateSpinning.countDown();
+                while (!go.get()) {
+                  Thread.onSpinWait();
+                }
+                mailbox.offer("late");
+                admissionOrder.add("late");
+              });
+      late.start();
+      lateSpinning.await();
+
+      assertEquals("seed", mailbox.take()); // frees the only slot; wakes 'early'
+      go.set(true); // release the already-spinning 'late' to race 'early' for that same slot
+
+      // Blocks until whichever of early/late wins the race enqueues, then frees the slot again
+      // for the loser.
+      assertTimeoutPreemptively(Duration.ofSeconds(2), mailbox::take);
+
+      early.join(Duration.ofSeconds(2).toMillis());
+      late.join(Duration.ofSeconds(2).toMillis());
+
+      assertEquals(
+          List.of("early", "late"),
+          admissionOrder,
+          "a sender already blocked must be admitted before one that arrives later (iteration "
+              + iteration
+              + ")");
+    }
+  }
+
+  private static void waitUntilBlocked(Thread thread) {
+    long deadlineNanos = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+    while (thread.getState() != Thread.State.WAITING
+        && thread.getState() != Thread.State.TIMED_WAITING) {
+      if (System.nanoTime() > deadlineNanos) {
+        throw new AssertionError("thread did not block in time: " + thread.getState());
+      }
+      Thread.onSpinWait();
+    }
   }
 }
