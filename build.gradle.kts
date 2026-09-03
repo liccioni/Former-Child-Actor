@@ -24,7 +24,7 @@ subprojects {
 
     configure<com.diffplug.gradle.spotless.SpotlessExtension> {
         java {
-            googleJavaFormat("1.25.2")
+            googleJavaFormat("1.28.0")
             targetExclude("build/**")
         }
     }
