@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, test, format & artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Formatting & static analysis
+        run: ./gradlew spotlessCheck --console=plain
+
+      - name: Compile
+        run: ./gradlew compileJava compileTestJava --console=plain
+
+      - name: Unit tests
+        run: ./gradlew test --console=plain
+
+      # No multi-process / multi-JVM integration suite exists yet — that lands with Transport in
+      # M7 (TASK-706) and needs real multiple JVMs, not just another Gradle source set. This step
+      # exists so the CI job shape (and the "every PR runs this" contract from TASK-002) doesn't
+      # need to change again once that suite exists; it's a no-op until then.
+      - name: Integration tests (placeholder — no suite until M7/TASK-706)
+        run: echo "No integration-test suite yet; see TASK-706."
+
+      - name: Build artifacts
+        run: ./gradlew build --console=plain
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            **/build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 7
