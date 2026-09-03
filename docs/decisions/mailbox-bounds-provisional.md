@@ -25,12 +25,13 @@ compare against later once TASK-306 changes the policy again.
 
 * Not a claim that block-on-full is the right policy long-term.
 * Not a claim that 1024 is a well-chosen capacity — no benchmark backs that number yet.
-* Not exhaustive: TASK-203 (M2) still needs to specify overflow, poison messages, and rejected
-  messages formally; this note only covers what TASK-103a needs to unblock M1/M2/M3 work.
+* Not exhaustive: this note only covers what TASK-103a needs to unblock M1/M2/M3 work. Overflow,
+  poison-message, and rejected-message semantics are formally specified in TASK-203's
+  `docs/decisions/ADR-004-mailbox-overflow-poison-rejection-semantics.md`.
 
 ## What happens next
 
 TASK-306 (M3) revisits this in light of the M3 benchmarks (TASK-301, TASK-302, TASK-307) and
-either confirms or replaces it, written up as the full ADR-003. Until then, do not change this
+either confirms or replaces it, written up as its own ADR. Until then, do not change this
 default without updating this note and flagging that the M3 benchmarks it fed may need
 re-running.
