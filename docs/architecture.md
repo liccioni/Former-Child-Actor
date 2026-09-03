@@ -20,9 +20,14 @@ An actor is addressed only through an `ActorRef<T>` — a stable, thread-safe ha
   below).
 * **Per-actor ordering:** messages sent by a single thread to a single actor are delivered in
   the order they were sent (the mailbox is FIFO).
-* **Cross-sender ordering is not guaranteed:** if two different threads each call `tell()` on
-  the same actor concurrently, the relative order in which their messages are enqueued is not
-  specified. Full ordering guarantees are formalized in M2 (TASK-201).
+* **Cross-sender causal ordering (TASK-201):** if `tell(A)` returns before `tell(B)` is called on
+  the same actor, and that ordering is established by real synchronization between the calling
+  threads, `A` is delivered before `B`. Two `tell()` calls with no happens-before relationship
+  between them have unspecified relative order — this is inherent to concurrency, not a gap. See
+  `docs/decisions/ADR-003-cross-sender-mailbox-ordering.md`.
+* **Backpressure admission order (TASK-201):** when the mailbox is full, senders blocked in
+  `tell()` are admitted in the order they began waiting (FIFO) once space frees up; a sender that
+  arrives later cannot jump ahead of one that is already blocked.
 
 ## 3. Concurrency guarantees
 
