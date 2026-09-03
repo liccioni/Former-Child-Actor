@@ -17,6 +17,7 @@ Standard JMH command-line options can be passed through, e.g. to run one benchma
 ```
 ./gradlew :benchmarks:jmh -Pjmh.includes=DispatchRoundTripBenchmark
 ./gradlew :benchmarks:jmh -Pjmh.includes=ActorCountScalabilityBenchmark -Pjmh.benchmarkParameters=actorCount=100000
+./gradlew :benchmarks:jmh -Pjmh.includes=MessagingLatencyDistributionBenchmark
 ```
 
 ## TASK-301: dispatch strategy measurement
@@ -41,4 +42,25 @@ work.
 carrying a `CountDownLatch` in the message rather than a request-response call — see
 `LatchCountingActor`.
 
-TASK-302, TASK-307, and TASK-308 are not yet implemented; see the open issues for what remains.
+## TASK-302: messaging throughput and latency distribution
+
+The original design document's Section 12 asks specifically for Messages/sec and a p50/p95/p99/p999
+latency breakdown — a percentile distribution, not just an average. TASK-301's benchmarks give solid
+throughput numbers (`ActorCountScalabilityBenchmark`'s `actorCount=1` row is itself a "messages/sec
+against one actor under 16 senders" data point) but nothing yet reports the tail, which is exactly
+where mailbox contention (lock acquisition, block-on-full backpressure — TASK-103a/ADR-003) actually
+shows up and an average or throughput number alone hides.
+
+`MessagingLatencyDistributionBenchmark` closes that gap, against a single already-warm actor:
+
+* `throughputUnderLoad` — Messages/sec under 16 concurrent senders (`Mode.Throughput`).
+* `latencyUncontended` — full latency distribution with a single sender (`Mode.SampleTime`), as a
+  clean baseline.
+* `latencyUnderLoad` — full latency distribution under the same 16-sender load as the throughput
+  benchmark — the number that actually answers TASK-302's question.
+
+JMH's `SampleTime` mode buckets individual invocation timings into percentiles automatically
+(`p50.0`, `p90.0`, `p95.0`, `p99.0`, `p99.9`, `p99.99`, `p99.999`, `p100`) — "p999" in the original
+document is the industry-standard shorthand for the 99.9th percentile, i.e. JMH's `p99.9` row.
+
+TASK-307 and TASK-308 are not yet implemented; see the open issues for what remains.
