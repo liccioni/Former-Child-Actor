@@ -2,8 +2,8 @@
 
 **This is not an ADR.** It is a placeholder decision, recorded so it is visible and so the M3
 benchmarks and the Day-1 experiment (Section 18 of the design document) measure a consistent,
-known policy instead of whatever was fastest to implement. It is superseded by the full ADR-003
-at TASK-306 (M3), once real benchmark data exists.
+known policy instead of whatever was fastest to implement. It is superseded by TASK-306's own ADR
+(M3), once real benchmark data exists.
 
 ## The decision
 
