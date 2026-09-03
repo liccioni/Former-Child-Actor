@@ -48,6 +48,17 @@ capacity (1024) and blocks the sending thread when full ("block-on-full"). This 
 provisional — chosen only so early benchmarks are comparable — and is revisited with real
 measurement data at TASK-306 (M3). See `docs/decisions/mailbox-bounds-provisional.md`.
 
+**Rejected message (TASK-203):** a rejected message is one offered to a mailbox that will never
+process it. Exactly three mechanisms produce a rejected message: `offer()` called after the
+mailbox is already closed; a sender blocked in `offer()` on a full mailbox, unblocked when
+`close()` runs before space frees; and a message already enqueued when `close()` runs, discarded
+before delivery (see "Lifecycle," below). Because `ActorRef.tell()` is `void`, a caller cannot
+distinguish any of these three from each other, or from successful delivery — "rejected" is a
+single, unobservable outcome from the caller's side. Overflow (blocking on a full mailbox) is not
+itself rejection: a blocked sender's message is still delivered once space frees, unless the actor
+stops while it is waiting. See
+`docs/decisions/ADR-004-mailbox-overflow-poison-rejection-semantics.md`.
+
 ## 5. Lifecycle
 
 1. `ActorSystem.spawn(...)` constructs the actor, registers it, and starts its dispatcher
@@ -57,10 +68,10 @@ measurement data at TASK-306 (M3). See `docs/decisions/mailbox-bounds-provisiona
    * an uncaught exception escapes `preStart` or `onMessage` (see "Failure handling" below), or
    * the owning `ActorSystem` shuts down.
 3. On stop, the mailbox is closed immediately: any messages still queued at that moment are
-   **discarded, not delivered**, and any sender currently blocked in `tell()` on a full mailbox
-   is unblocked (its message is also dropped). The actor finishes the message it is currently
-   processing, if any, then `postStop` runs (best-effort — an exception there is logged and
-   ignored, since the actor is already terminating).
+   **rejected, not delivered** (§4), and any sender currently blocked in `tell()` on a full
+   mailbox is unblocked (its message is also rejected, §4). The actor finishes the message it is
+   currently processing, if any, then `postStop` runs (best-effort — an exception there is logged
+   and ignored, since the actor is already terminating).
 4. Once `postStop` completes, the actor is terminated: `ActorRef.isTerminated()` becomes `true`,
    and every subsequent `tell()` is silently dropped. The `ActorRef` itself remains a valid,
    inert object — it is never invalidated or reused for a different actor.
@@ -76,6 +87,14 @@ failure is logged with the actor's identity and the message being processed, and
 alone* is stopped, following the normal lifecycle above. No other actor, and not the
 `ActorSystem` itself, is affected — this holds structurally, because each actor runs on its own
 thread and failures never cross that boundary.
+
+**Poison message (TASK-203):** the message whose processing triggers this — the one `onMessage`
+or `preStart` was handling when it threw — is termed a poison message. Because M1–M3 have no
+redelivery or retry mechanism, a poison message structurally cannot cause a retry loop: it is
+processed at most once, the actor stops, and the message is never redelivered to this or any
+other actor. This guarantee holds only through M1–M3; M4 (TASK-402) must explicitly re-examine
+whether a restarted actor can receive the same poison message again. See
+`docs/decisions/ADR-004-mailbox-overflow-poison-rejection-semantics.md`.
 
 This is a safety net, not the supervision model. Configurable strategies (Resume, Restart, Stop,
 Escalate) and actor hierarchies arrive in M4 (TASK-402).
