@@ -68,13 +68,15 @@ stops while it is waiting. See
    * an uncaught exception escapes `preStart` or `onMessage` (see "Failure handling" below), or
    * the owning `ActorSystem` shuts down.
 3. On stop, the mailbox is closed immediately: any messages still queued at that moment are
-   **rejected, not delivered** (§4), and any sender currently blocked in `tell()` on a full
-   mailbox is unblocked (its message is also rejected, §4). The actor finishes the message it is
-   currently processing, if any, then `postStop` runs (best-effort — an exception there is logged
-   and ignored, since the actor is already terminating).
+   **rejected, not delivered** (see "Mailbox," above), and any sender currently blocked in
+   `tell()` on a full mailbox is unblocked (its message is also rejected — see "Mailbox,"
+   above). The actor finishes the message it is currently processing, if any, then `postStop`
+   runs (best-effort — an exception there is logged and ignored, since the actor is already
+   terminating).
 4. Once `postStop` completes, the actor is terminated: `ActorRef.isTerminated()` becomes `true`,
-   and every subsequent `tell()` is silently dropped. The `ActorRef` itself remains a valid,
-   inert object — it is never invalidated or reused for a different actor.
+   and every subsequent `tell()` is silently rejected (see "Mailbox," above). The `ActorRef`
+   itself remains a valid, inert object — it is never invalidated or reused for a different
+   actor.
 
 This is a deliberately simple stop model for M1: no draining, no "let the mailbox empty out
 first" mode. `ActorSystem.close()` (or the try-with-resources form) stops every actor and blocks

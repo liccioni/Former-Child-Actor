@@ -32,7 +32,7 @@ A **poison message** is the message whose processing (`onMessage` or `preStart`)
 the actor that received it to stop — the log-and-stop default (`docs/architecture.md` §6,
 TASK-107a).
 
-Guarantee: because M1/M2 have no redelivery or retry mechanism, a poison message structurally
+Guarantee: because M1–M3 have no redelivery or retry mechanism, a poison message structurally
 cannot cause a retry loop — it is processed at most once, the actor stops, and the message is
 never redelivered to this or any other actor. This guarantee holds only through M1–M3; M4
 (TASK-402) introduces configurable supervision, including Restart, and must explicitly re-examine
@@ -41,9 +41,9 @@ whether a restarted actor can receive the same poison message again.
 ### 3. Rejected message
 
 A **rejected message** is one offered to a mailbox that will never process it. This term unifies
-what `docs/architecture.md` and `Mailbox`'s javadoc currently call "discarded," "dropped," and "not
-delivered" — they are the same outcome from the caller's perspective. Exactly three mechanisms
-produce a rejected message:
+what `docs/architecture.md` previously called, and what `Mailbox`'s javadoc still calls,
+"discarded," "dropped," and "not delivered" — they are the same outcome from the caller's
+perspective. Exactly three mechanisms produce a rejected message:
 
 1. `offer()` is called after the mailbox is already closed — the message is never enqueued.
 2. A sender is blocked in `offer()` on a full mailbox, and `close()` runs before space frees — the
@@ -80,6 +80,10 @@ scope for this ADR — YAGNI until a caller exists that can observe the differen
 * `docs/architecture.md` §4–§6 now use "rejected message" and "poison message" as defined terms,
   cross-referencing this ADR instead of describing the same behavior with inconsistent wording in
   each section.
+* `Mailbox.java`, `ActorRef.java`, and `ActorCell.java`'s own javadoc still use the pre-ADR-004
+  wording ("dropped," "discarded," "not delivered") — deliberately: this ADR is documentation-only
+  and makes no code changes. Aligning the javadoc to this ADR's terminology is deferred to
+  whichever future task next touches those files.
 * `docs/decisions/mailbox-bounds-provisional.md`'s "What this is not" section no longer needs to
   flag overflow/poison/rejection semantics as unspecified; it points here instead.
 * No code or test changes:
