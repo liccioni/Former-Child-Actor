@@ -1,6 +1,7 @@
 # Benchmarks
 
-JMH benchmark suite for the actor runtime (M3): TASK-301, TASK-302, TASK-303, TASK-307, TASK-308.
+JMH benchmark suite for the actor runtime (M3): TASK-301, TASK-302, TASK-303, TASK-306, TASK-307,
+TASK-308.
 
 Benchmark sources live in `src/jmh/java`, using the
 [`me.champeau.jmh`](https://github.com/melix/jmh-gradle-plugin) Gradle plugin. They are not part
@@ -19,6 +20,7 @@ Standard JMH command-line options can be passed through, e.g. to run one benchma
 ./gradlew :benchmarks:jmh -Pjmh.includes=ActorCountScalabilityBenchmark -Pjmh.benchmarkParameters=actorCount=100000
 ./gradlew :benchmarks:jmh -Pjmh.includes=MessagingLatencyDistributionBenchmark
 ./gradlew :benchmarks:jmh -Pjmh.includes=SharedPoolDispatchBenchmark
+./gradlew :benchmarks:jmh -Pjmh.includes=MailboxBackpressureBenchmark
 ```
 
 TASK-307's memory-footprint measurement is not a JMH benchmark (see below for why) and runs via its
@@ -117,5 +119,37 @@ This is inherently approximate — `Runtime.gc()` is a request, not a guarantee,
 includes JIT-compiled code and class-metadata growth unrelated to actor count — so all trials are
 printed, not just an average, to keep that noise visible rather than hidden behind one falsely
 precise number.
+
+## TASK-306: mailbox bounds/backpressure decision
+
+TASK-103a's bounded, block-on-full default (`Mailbox.DEFAULT_CAPACITY = 1024`) was explicitly
+provisional, deferred to real benchmark data at TASK-306. TASK-301/302's benchmarks don't supply
+that data by themselves: their busiest case (16 senders against one actor) never drives a mailbox
+anywhere near capacity 1024, so they show how the runtime behaves well below the limit, not what
+the limit itself costs or buys. TASK-306 closes that gap with two purpose-built measurements.
+
+`BoundedBlockingMailbox` (in `src/main/java`, so both `src/test/java` and `src/jmh/java` can see
+it) is a faithful copy of `framework-core`'s package-private `Mailbox`, parameterized by capacity —
+the real `Mailbox`'s capacity isn't public API, so this is the only way to compare capacities
+directly. `BoundedBlockingMailboxTest` proves it behaves identically (FIFO order, blocks while
+full, capacity enforced, unblocks on `close()`) before any benchmark number from it is trusted, the
+same discipline TASK-303's `SharedPoolActorCell` established.
+
+* `MailboxBackpressureBenchmark` — a consumer deliberately throttled to ~1 message/ms against 8
+  concurrent senders, so the mailbox is genuinely saturated throughout the run rather than only
+  occasionally full. Measures accepted throughput and `offer()` blocking latency at capacities 16,
+  128, 1024, and 8192. Result: both are invariant to capacity once saturated (~975-981 ops/s,
+  ~8140-8155 µs mean latency across all four) — exactly what queueing theory predicts once arrivals
+  exceed a bottlenecked consumer's fixed service rate.
+* A fourth `MemoryFootprintHarness` scenario (see below) fills `BoundedBlockingMailbox` instances to
+  exactly their capacity with a single shared sentinel message, isolating the backing array's cost
+  from per-message payload size. Result: retained memory scales roughly linearly with capacity once
+  actually saturated — 250 / 700 / 5,398 / 40,184 bytes per mailbox at capacities 16 / 128 / 1024 /
+  8192 — while the current default (1024) costs only ~5.4 KB even fully saturated, barely more than
+  TASK-307's idle-actor baseline.
+
+Decision: **confirm** the current default — bounded, block-on-full, capacity 1024. No change to
+`framework-core`. See `docs/decisions/ADR-007-mailbox-bounds-confirmed.md` for the full reasoning,
+including what this data does and doesn't cover.
 
 TASK-308 is not yet implemented; see the open issues for what remains.

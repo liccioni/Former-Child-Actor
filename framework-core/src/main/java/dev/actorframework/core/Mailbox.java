@@ -7,11 +7,11 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * The FIFO queue of messages waiting to be processed by a single actor (TASK-103).
  *
- * <p><b>Provisional bounds decision (TASK-103a):</b> the mailbox is bounded with a generous default
- * capacity and blocks the sending thread when full ("block-on-full"). This is a deliberately
- * provisional default, chosen only so that early benchmarks and the Day-1 experiment (Section 18)
- * are comparable; it is revisited with real measurements at TASK-306 and recorded in {@code
- * docs/decisions/mailbox-bounds-provisional.md}. Do not treat this policy as final.
+ * <p><b>Bounds confirmed with benchmark data (TASK-306):</b> the mailbox is bounded with a default
+ * capacity and blocks the sending thread when full ("block-on-full"). TASK-103a chose this only so
+ * early benchmarks and the Day-1 experiment (Section 18) would be comparable; TASK-306 confirmed
+ * both the policy and the specific default capacity against real backpressure data. See {@code
+ * docs/decisions/ADR-007-mailbox-bounds-confirmed.md}.
  *
  * <p>Thread safety: {@link #offer} may be called concurrently by many sender threads. {@link #take}
  * is called by exactly one thread — the actor's dedicated dispatcher thread (TASK-105) — which is
@@ -30,7 +30,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 final class Mailbox<T> {
 
-  /** Provisional default capacity (TASK-103a) — not yet backed by benchmark data. */
+  /** Default capacity, confirmed by benchmark data (TASK-306, ADR-007). */
   static final int DEFAULT_CAPACITY = 1024;
 
   private final ArrayDeque<T> queue;
