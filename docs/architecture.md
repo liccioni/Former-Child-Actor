@@ -36,6 +36,11 @@ a given actor instance. This is achieved with the simplest possible mechanism: *
 a single dedicated virtual thread for its entire lifetime**, and that thread is the only thread
 that ever calls into the actor's code. See `Dispatcher` and ADR-002.
 
+**Dispatch strategy confirmed with data (TASK-303):** the shared-executor alternative ADR-002
+deferred to measurement was built and benchmarked against the same workload as TASK-301/302's
+data. It loses decisively at every actor count tested — a fixed thread pool plateaus at the core
+count, while one-thread-per-actor keeps scaling well past it. See ADR-006 for the full comparison.
+
 **Java Memory Model review (TASK-207):** because all of an actor's own state is touched only by
 that one thread, visibility across messages is plain program order — no synchronization is
 needed for actor-owned fields. The one real cross-thread boundary is the mailbox: its lock gives

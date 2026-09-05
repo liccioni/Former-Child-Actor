@@ -1,6 +1,6 @@
 # Benchmarks
 
-JMH benchmark suite for the actor runtime (M3): TASK-301, TASK-302, TASK-307, TASK-308.
+JMH benchmark suite for the actor runtime (M3): TASK-301, TASK-302, TASK-303, TASK-307, TASK-308.
 
 Benchmark sources live in `src/jmh/java`, using the
 [`me.champeau.jmh`](https://github.com/melix/jmh-gradle-plugin) Gradle plugin. They are not part
@@ -18,6 +18,7 @@ Standard JMH command-line options can be passed through, e.g. to run one benchma
 ./gradlew :benchmarks:jmh -Pjmh.includes=DispatchRoundTripBenchmark
 ./gradlew :benchmarks:jmh -Pjmh.includes=ActorCountScalabilityBenchmark -Pjmh.benchmarkParameters=actorCount=100000
 ./gradlew :benchmarks:jmh -Pjmh.includes=MessagingLatencyDistributionBenchmark
+./gradlew :benchmarks:jmh -Pjmh.includes=SharedPoolDispatchBenchmark
 ```
 
 ## TASK-301: dispatch strategy measurement
@@ -62,5 +63,19 @@ shows up and an average or throughput number alone hides.
 JMH's `SampleTime` mode buckets individual invocation timings into percentiles automatically
 (`p50.0`, `p90.0`, `p95.0`, `p99.0`, `p99.9`, `p99.99`, `p99.999`, `p100`) — "p999" in the original
 document is the industry-standard shorthand for the 99.9th percentile, i.e. JMH's `p99.9` row.
+
+## TASK-303: dispatch strategy evaluation
+
+ADR-002 deferred one specific alternative to real measurement: a shared executor (a fixed pool of
+threads processing a queue of "actor has work" events) instead of one dedicated virtual thread per
+actor. `SharedPoolActorCell` (in `src/main/java`, so both `src/test/java` and `src/jmh/java` can
+see it) is a minimal but correct prototype of that pattern — `SharedPoolActorCellTest` proves it
+gives the same delivery and sequential-processing guarantees `ActorCell` does before any benchmark
+number from it is trusted. `SharedPoolDispatchBenchmark` runs the exact same workload shape as
+TASK-301's `ActorCountScalabilityBenchmark` against it, so the two are directly comparable.
+
+Result: the shared executor loses decisively and consistently at every actor count tested — see
+ADR-006 for the full comparison and data. ADR-002's strategy is confirmed, not replaced; no changes
+to `framework-core`.
 
 TASK-307 and TASK-308 are not yet implemented; see the open issues for what remains.
