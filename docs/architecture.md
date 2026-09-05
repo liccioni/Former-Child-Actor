@@ -1,7 +1,6 @@
 # Architecture
 
-Status: living document, updated as milestones land. Current milestone: **M1 — Minimal Actor
-Runtime**.
+Status: living document, updated as milestones land. Current milestone: **M4 — Supervision**.
 
 ## 1. Actor model
 
@@ -85,7 +84,10 @@ stops while it is waiting. See
    thread, which calls `preStart` and then enters the message loop.
 2. An actor stops when:
    * `ActorSystem.stop(ref)` is called explicitly, or
-   * an uncaught exception escapes `preStart` or `onMessage` (see "Failure handling" below), or
+   * an uncaught exception escapes `preStart` or `onMessage` and its `SupervisorStrategy` decides
+     `Stop` or `Escalate` (see "Failure handling" below), or
+   * its supervisor (parent) stops, or an `Escalate` decision elsewhere in its ancestor chain
+     cascades a stop down to it (TASK-402), or
    * the owning `ActorSystem` shuts down.
 3. On stop, the mailbox is closed immediately: any messages still queued at that moment are
    **rejected, not delivered** (see "Mailbox," above), and any sender currently blocked in
@@ -102,30 +104,56 @@ This is a deliberately simple stop model for M1: no draining, no "let the mailbo
 first" mode. `ActorSystem.close()` (or the try-with-resources form) stops every actor and blocks
 until all of them have finished terminating.
 
-## 6. Failure handling (TASK-107a)
+## 6. Actor hierarchies (TASK-402)
 
-There is one, non-configurable default for M1: if `onMessage` (or `preStart`) throws, the
-failure is logged with the actor's identity and the message being processed, and *that actor
-alone* is stopped, following the normal lifecycle above. No other actor, and not the
-`ActorSystem` itself, is affected — this holds structurally, because each actor runs on its own
-thread and failures never cross that boundary.
+An actor may spawn children of its own from within `preStart`/`onMessage`, via
+`ActorContext.spawnChild(factory, name[, strategy])`, becoming their supervisor. A child's id is
+namespaced under its parent's (`parent.id() + "/" + name`). A **top-level actor** (spawned via
+`ActorSystem.spawn`) has no parent and always behaves exactly as TASK-107a originally specified
+— see "Failure handling," below; only a spawned child gets a configurable `SupervisorStrategy`.
 
-**Poison message (TASK-203):** the message whose processing triggers this — the one `onMessage`
-or `preStart` was handling when it threw — is termed a poison message. Because M1–M3 have no
-redelivery or retry mechanism, a poison message structurally cannot cause a retry loop: it is
-processed at most once, the actor stops, and the message is never redelivered to this or any
-other actor. This guarantee holds only through M1–M3; M4 (TASK-402) must explicitly re-examine
-whether a restarted actor can receive the same poison message again. See
-`docs/decisions/ADR-004-mailbox-overflow-poison-rejection-semantics.md`.
+Stopping an actor stops every actor it supervises, transitively — a supervisor's children (and
+their own children, and so on) always go with it. This applies uniformly whether the stop was
+requested explicitly (`ActorSystem.stop`), came from a `Stop` directive (below), or cascaded down
+from a stop somewhere above it in the hierarchy.
 
-This is a safety net, not the supervision model. Configurable strategies (Resume, Restart, Stop,
-Escalate) and actor hierarchies arrive in M4 (TASK-402).
+## 7. Failure handling (TASK-107a, TASK-402)
 
-## 7. API philosophy
+**Top-level actors are unchanged from M1:** if `preStart`/`onMessage` throws, the failure is
+logged and *that actor alone* is stopped, following the normal lifecycle above. This remains
+non-configurable for a top-level actor — becoming a supervisor (spawning children) is how an
+actor gets access to the configurable behavior below.
+
+**A child actor's failure is handled by the `SupervisorStrategy` it was given at spawn time** (a
+plain, stateless function of the failure — consulted only by the failing actor itself, on its own
+dispatcher thread), choosing one of four directives:
+
+* **Resume** — the actor keeps its existing state and keeps running, as if nothing happened.
+* **Restart** — the actor is replaced with a fresh instance (state reset); `preRestart`/
+  `postRestart` hooks run around the swap, best-effort.
+* **Stop** — the actor stops, following the normal lifecycle (and cascades to its own children,
+  per "Actor hierarchies," above) — TASK-107a's old default, now one of four choices rather than
+  the only one.
+* **Escalate** — the actor stops, and so does its entire ancestor chain up to the root (each
+  ancestor's own stop cascading back down to *its* children too). An actor with no parent stops on
+  its own, same as `Stop`.
+
+**Poison message (TASK-203):** the message whose processing triggers a failure — the one
+`onMessage` or `preStart` was handling when it threw — is termed a poison message. It is always
+processed at most once and never redelivered, **including under `Restart`**: `Mailbox.take()`
+already removes a message before `onMessage` (or the failure) happens, so there is nothing left in
+the mailbox to redeliver by the time any `SupervisorStrategy` is even consulted. See
+`docs/decisions/ADR-004-mailbox-overflow-poison-rejection-semantics.md` and
+`docs/decisions/ADR-008-supervision-strategies-and-hierarchies.md` for the full derivation and
+semantics (including what this deliberately does not cover: restart rate-limiting, and dynamic
+re-supervision on `Escalate`).
+
+## 8. API philosophy
 
 * Small core, own the stack, local-first.
-* Complexity is opt-in: nothing beyond `ActorSystem`, `ActorRef`, `Actor`, `Mailbox`, and
-  `Dispatcher` exists yet, on purpose.
+* Complexity is opt-in: an actor only gets configurable supervision by choosing to spawn children
+  (`ActorContext.spawnChild`); a plain top-level actor still behaves exactly like M1's fixed
+  default, with nothing extra to learn or configure.
 * No API is finalized until proven through implementation and tests — in particular, `ask()`
   does not exist yet; it is designed in ADR-015 (M5) before it is added.
 

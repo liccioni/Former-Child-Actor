@@ -154,3 +154,27 @@ swapping the mailbox's lock for something that doesn't provide the same happens-
 * Any future change to `Mailbox`'s synchronization strategy, or to the one-thread-per-actor
   dispatch strategy (TASK-303, M3), must re-derive these happens-before edges explicitly rather
   than assume they still hold — this ADR is the checklist for that re-derivation.
+
+## Addendum (TASK-402): `actor` is no longer `final`
+
+§5 above lists `actor` among the fields whose `final`-ness contributes to safe publication. TASK-402
+(configurable supervision) needs `Directive.RESTART` to replace an actor's instance in place, so
+`ActorCell.actor` dropped `final`. This does not reopen §5's conclusion, for two independent
+reasons:
+
+* The *initial* instance's safe publication to the dispatcher thread never actually needed
+  `final` — the `Executor.execute()` happens-before edge (the second, independent guarantee §5
+  already names) covers *every* field write the constructing thread made before submitting
+  `cell::run`, not only writes to `final` fields. Losing `final` on this one field does not remove
+  that edge.
+* Every *subsequent* write to `actor` (each `RESTART`) happens inside
+  `ActorCell.handleFailureAndDecideContinue`, which — like `preStart`/`onMessage`/`postStop` before
+  it — only ever runs on this cell's own dispatcher thread (it is reached from `run()` and
+  `dispatchLoop()`, both already confirmed single-threaded per §1). So every write and every
+  subsequent read of `actor` after construction happens in program order on that one thread — the
+  same "no second thread involved" reasoning §1 already gives actor-owned state, not a new
+  cross-thread visibility question.
+
+No other field's safe-publication story changes. `ActorRefImpl` and `ActorContextImpl` still never
+read `actor` directly. See `docs/decisions/ADR-008-supervision-strategies-and-hierarchies.md` for
+the full supervision design.

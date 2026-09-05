@@ -18,18 +18,22 @@ package dev.actorframework.core;
 public interface Actor<T> {
 
   /**
-   * Called once before the first message is processed.
+   * Called once before the first message is processed, and again after a {@link Directive#RESTART}
+   * (on the fresh instance, before it takes over).
    *
-   * <p>A failure thrown here is treated the same as a failure thrown from {@link #onMessage}
-   * (TASK-107a): it is logged and the actor is stopped without processing any message.
+   * <p>A failure thrown here is handled the same way a failure from {@link #onMessage} is
+   * (TASK-402: by this actor's {@link SupervisorStrategy}) — for a top-level actor, or whenever the
+   * resulting directive is {@link Directive#STOP} or {@link Directive#ESCALATE}, that means:
+   * logged, and the actor stops without processing any message.
    */
   default void preStart(ActorContext<T> context) throws Exception {}
 
   /**
    * Processes a single message. Invocations are strictly sequential per actor instance.
    *
-   * <p>An uncaught exception here stops this actor and this actor alone (TASK-107a); it never
-   * affects sibling actors or the {@link ActorSystem}.
+   * <p>An uncaught exception here is handled by this actor's {@link SupervisorStrategy} (TASK-402);
+   * it never affects sibling actors or the {@link ActorSystem} directly (only an {@link
+   * Directive#ESCALATE} decision propagates further, and only up this actor's own ancestor chain).
    */
   void onMessage(ActorContext<T> context, T message) throws Exception;
 
@@ -39,4 +43,19 @@ public interface Actor<T> {
    * actor is already terminating.
    */
   default void postStop(ActorContext<T> context) throws Exception {}
+
+  /**
+   * Called on the old instance just before a {@link Directive#RESTART} replaces it with a fresh
+   * one, given the failure that triggered the restart and the message being processed when it threw
+   * ({@code null} if the failure was in {@link #preStart}). Best-effort: an exception thrown here
+   * is logged and otherwise ignored — the old instance is being discarded regardless.
+   */
+  default void preRestart(ActorContext<T> context, Throwable failure, T message) throws Exception {}
+
+  /**
+   * Called on the fresh instance right after a {@link Directive#RESTART}, once its own {@link
+   * #preStart} has succeeded, given the failure that triggered the restart. Best-effort: an
+   * exception thrown here is logged and otherwise ignored.
+   */
+  default void postRestart(ActorContext<T> context, Throwable failure) throws Exception {}
 }

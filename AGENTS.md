@@ -54,9 +54,13 @@ risks invalidating work upstream or downstream of the change:
 * **What happens to queued messages when an actor stops** (currently: discarded, not delivered).
 * **The dispatch strategy** (currently: one dedicated virtual thread per actor for its whole
   lifetime). Alternatives are evaluated with benchmarks at TASK-303 (M3), not swapped in ad hoc.
-* **The minimal failure-handling default** (TASK-107a: log and stop that actor alone). This is
-  intentionally not configurable in M1 — configurable supervision arrives in M4 (TASK-402) and
-  supersedes this, but it doesn't get quietly extended before then.
+* **The failure-handling default.** TASK-107a's fixed "log and stop that actor alone" was
+  intentionally not configurable in M1, and has since been superseded by configurable supervision
+  strategies and actor hierarchies at TASK-402
+  (`docs/decisions/ADR-008-supervision-strategies-and-hierarchies.md`) — a top-level actor still
+  gets exactly TASK-107a's behavior, unconfigurable, but any future change to that, to the four
+  supervision directives, or to hierarchy/cascade semantics needs a new ADR that engages with
+  ADR-008, not a silent edit.
 * **Anything touching the pre-M10 trust boundary** — see `docs/decisions/ADR-000-*.md`. Before
   M10's real security work (TASK-1007), no transport or cluster component may bind to anything
   other than localhost by default, and none may be documented or marketed as safe for an
