@@ -1,6 +1,6 @@
 # ADR-002: Virtual threads as the initial execution model
 
-* Status: Accepted (provisional dispatch strategy — see "Revisit" below)
+* Status: Accepted — confirmed with benchmark data at TASK-303 (see ADR-006)
 * Written during: M0/M1
 
 ## Context
@@ -41,6 +41,12 @@ This is chosen because:
 
 TASK-303 (M3) evaluates all of these against real measurements and may replace this strategy.
 Until then, this ADR records *why* the current strategy was chosen, not that it is final.
+
+**Resolved at TASK-303 (ADR-006):** the shared-executor alternative was built and benchmarked
+against the exact same workload as TASK-301's data. It loses decisively and consistently across
+every actor count tested — a fixed thread pool plateaus at the core count, while one-thread-per-
+actor keeps scaling well past it. The strategy below is confirmed, not just provisional; see
+ADR-006 for the full comparison and its caveats.
 
 ## Consequences
 
