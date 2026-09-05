@@ -37,6 +37,8 @@ milestone that actually needs them.
   happy-path tests.
 * Run `./gradlew build` before considering any change to `framework-core` or `framework-testkit`
   done.
+* **Bug fixes always come with a regression test.** Write the test first so it fails against the
+  pre-fix code, then land the fix — test and fix in the same commit/PR, not a follow-up.
 
 ## Things that require a new ADR before changing, not a silent code change
 

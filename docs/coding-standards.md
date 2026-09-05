@@ -51,6 +51,8 @@ relevant TASK/ADR — the code and the decision record should never drift apart 
 * `framework-core` tests may reach into package-private internals (e.g. `Mailbox`) directly,
   since they live in the same package. Tests for anything outside `framework-core` use the
   public API only.
+* Every bug fix ships with a regression test that reproduces the bug — it fails against the
+  pre-fix code and passes once the fix lands — in the same change, never deferred to a follow-up.
 
 ## Benchmarking expectations
 
