@@ -21,6 +21,7 @@ Standard JMH command-line options can be passed through, e.g. to run one benchma
 ./gradlew :benchmarks:jmh -Pjmh.includes=MessagingLatencyDistributionBenchmark
 ./gradlew :benchmarks:jmh -Pjmh.includes=SharedPoolDispatchBenchmark
 ./gradlew :benchmarks:jmh -Pjmh.includes=MailboxBackpressureBenchmark
+./gradlew :benchmarks:jmh -Pjmh.includes=ActorSpawnBenchmark
 ```
 
 TASK-307's memory-footprint measurement is not a JMH benchmark (see below for why) and runs via its
@@ -152,4 +153,22 @@ Decision: **confirm** the current default — bounded, block-on-full, capacity 1
 `framework-core`. See `docs/decisions/ADR-007-mailbox-bounds-confirmed.md` for the full reasoning,
 including what this data does and doesn't cover.
 
-TASK-308 is not yet implemented; see the open issues for what remains.
+## TASK-308: actor spawn cost
+
+None of TASK-301/302/306/307 isolate the cost of `ActorSystem.spawn()` itself: TASK-301's
+`ActorCountScalabilityBenchmark` spawns its actors once in `@Setup`, outside the timed benchmark,
+and every other benchmark in the suite spawns a single already-warm actor before measuring
+anything. ADR-002 names an open question this leaves unanswered — "actor count is currently
+bounded only by how many virtual threads (and their associated mailboxes) the JVM can hold" — from
+the per-operation-cost side; TASK-307 already covers the standing-memory side.
+
+`ActorSpawnBenchmark` measures spawn directly. Each operation pairs a spawn with an immediate stop
+request so a long-running measurement doesn't accumulate an unbounded number of live actors and
+their virtual threads — requesting a stop before any message is ever sent lets that actor's
+dispatch loop see a closed, empty mailbox and exit almost as soon as it's scheduled, so the pair's
+cost is dominated by spawn, not by the (much cheaper) stop request itself:
+
+* `spawnThroughputUnderLoad` — spawns/sec sustained under 16 concurrent spawning threads.
+* `spawnLatencyUncontended` — full spawn-latency distribution (p50/p95/p99/p999), single-threaded.
+* `spawnLatencyUnderLoad` — the same distribution under the same 16-thread contended load as
+  `spawnThroughputUnderLoad`.

@@ -5,6 +5,11 @@
 // actor, and how that cost holds up as the number of live actors grows. This is the real
 // measurement data TASK-303 (dispatcher alternatives) and TASK-306 (mailbox bounds) are gated on
 // before either is revisited.
+//
+// TASK-308 measures the one operation none of TASK-301/302/306/307 isolate: the cost of
+// ActorSystem.spawn() itself, closing ADR-002's other open question ("actor count is bounded
+// only by how many virtual threads the JVM can hold") from the per-spawn-cost side, alongside
+// TASK-307's standing-memory-per-actor side.
 
 plugins {
     id("me.champeau.jmh") version "0.7.3"
