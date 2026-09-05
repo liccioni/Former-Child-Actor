@@ -24,3 +24,15 @@ jmh {
     resultFormat.set("JSON")
     resultsFile.set(layout.buildDirectory.file("results/jmh/results.json"))
 }
+
+// TASK-307: a retained-heap-footprint measurement, deliberately not a JMH benchmark — JMH's
+// timing/allocation-rate model doesn't fit "how much memory does N idle actors cost." See
+// MemoryFootprintHarness for why and how.
+tasks.register<JavaExec>("memoryFootprint") {
+    group = "benchmark"
+    description = "TASK-307: standing memory footprint per actor (not JMH; see MemoryFootprintHarness)."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("dev.actorframework.benchmarks.MemoryFootprintHarness")
+    // Spawning tens of thousands of actors (and their virtual threads) needs real heap room.
+    maxHeapSize = "1g"
+}

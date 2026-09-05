@@ -21,6 +21,13 @@ Standard JMH command-line options can be passed through, e.g. to run one benchma
 ./gradlew :benchmarks:jmh -Pjmh.includes=SharedPoolDispatchBenchmark
 ```
 
+TASK-307's memory-footprint measurement is not a JMH benchmark (see below for why) and runs via its
+own task instead:
+
+```
+./gradlew :benchmarks:memoryFootprint
+```
+
 ## TASK-301: dispatch strategy measurement
 
 ADR-002 (one dedicated virtual thread per actor) named two open questions it deferred to
@@ -78,4 +85,37 @@ Result: the shared executor loses decisively and consistently at every actor cou
 ADR-006 for the full comparison and data. ADR-002's strategy is confirmed, not replaced; no changes
 to `framework-core`.
 
-TASK-307 and TASK-308 are not yet implemented; see the open issues for what remains.
+## TASK-307: memory footprint per actor
+
+The design document's Section 12 also asks for memory per actor: an empty actor, an actor with a
+mailbox, and an actor under load. This is deliberately **not** a JMH benchmark: JMH's timing
+harness (and its bundled GCProfiler) measures allocation *rate* — bytes allocated per operation —
+which fits throughput/latency questions (TASK-301/302) but not "how much heap does N *live, idle*
+actors cost, standing around?" That is a retained-footprint snapshot, not a per-operation rate.
+
+`MemoryFootprintHarness` (a plain `main()`, not `@Benchmark`-annotated) measures it directly: force
+GC, sample `Runtime` heap usage, spawn or exercise N actors, sample again, divide the delta by N.
+Three scenarios:
+
+* **Empty actor** — freshly spawned, no message ever sent: the baseline cost of `ActorCell` plus a
+  never-touched `Mailbox` (whose backing `ArrayDeque` pre-sizes to 256 slots at construction,
+  regardless of whether it's ever used).
+* **Actor with mailbox after a burst, now idle** — every actor already has a mailbox from birth, so
+  the meaningful comparison isn't "with vs. without" but whether a mailbox that briefly held a
+  backlog leaves a permanently larger footprint once idle again. `ArrayDeque` never shrinks its
+  backing array back down after growing, so a burst of 300 messages (forced past the initial
+  256-slot array by briefly blocking the actor's own dispatcher thread) is expected to leave, and
+  did leave in a local run, a measurably larger idle footprint than an actor that was never
+  touched.
+* **Actor under sustained load** — memory sampled *while* many actors are being actively bombarded
+  with messages, not after things settle, and deliberately without a forced GC (which would itself
+  distort an active workload) — expect more sample-to-sample noise here than the other two
+  scenarios, including the occasional low or even near-zero delta if an unforced GC happens to run
+  during the sampling window; that's the tradeoff for not perturbing the live workload, not a bug.
+
+This is inherently approximate — `Runtime.gc()` is a request, not a guarantee, and heap usage
+includes JIT-compiled code and class-metadata growth unrelated to actor count — so all trials are
+printed, not just an average, to keep that noise visible rather than hidden behind one falsely
+precise number.
+
+TASK-308 is not yet implemented; see the open issues for what remains.
