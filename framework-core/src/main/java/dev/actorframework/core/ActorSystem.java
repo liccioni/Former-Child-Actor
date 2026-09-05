@@ -55,13 +55,34 @@ public final class ActorSystem implements AutoCloseable {
    * @throws IllegalStateException if this system is shutting down
    */
   public <T> ActorRef<T> spawn(Supplier<Actor<T>> factory, String name) {
+    return spawnInternal(null, factory, name);
+  }
+
+  /**
+   * Spawns a new child of {@code parent} (TASK-402). Package-private: reached only through {@link
+   * ActorContext#spawn}, never called directly by application code.
+   *
+   * @throws IllegalArgumentException if {@code parent} already has a child with this name
+   * @throws IllegalStateException if this system is shutting down
+   */
+  <T> ActorRef<T> spawnChild(ActorCell<?> parent, Supplier<Actor<T>> factory, String name) {
+    return spawnInternal(
+        parent, factory, name != null ? name : "actor-" + anonymousActorCount.incrementAndGet());
+  }
+
+  private <T> ActorRef<T> spawnInternal(
+      ActorCell<?> parent, Supplier<Actor<T>> factory, String name) {
     if (shuttingDown.get()) {
       throw new IllegalStateException(
           "Cannot spawn actor '" + name + "': ActorSystem '" + this.name + "' is shutting down");
     }
-    ActorCell<T> cell = new ActorCell<>(this, name, factory.get());
-    if (actors.putIfAbsent(name, cell) != null) {
-      throw new IllegalArgumentException("An actor named '" + name + "' already exists");
+    String id = parent == null ? name : parent.id() + "/" + name;
+    ActorCell<T> cell = new ActorCell<>(this, id, factory, parent);
+    if (actors.putIfAbsent(id, cell) != null) {
+      throw new IllegalArgumentException("An actor named '" + id + "' already exists");
+    }
+    if (parent != null) {
+      parent.addChild(cell);
     }
     dispatcher.execute(cell::run);
     return cell.ref();

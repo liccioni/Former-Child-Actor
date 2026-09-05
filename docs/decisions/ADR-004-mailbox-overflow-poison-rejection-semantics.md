@@ -2,6 +2,9 @@
 
 * Status: Accepted
 * Written during: M2 (TASK-203)
+* Revisited by: `docs/decisions/ADR-008-supervision-strategies-and-actor-hierarchies.md` (M4,
+  TASK-402) — reaffirms, rather than overturns, the poison-message guarantee below: it is never
+  redelivered under any supervision directive, including Restart. See ADR-008 for how.
 
 ## Context
 

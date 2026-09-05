@@ -39,4 +39,23 @@ public interface Actor<T> {
    * actor is already terminating.
    */
   default void postStop(ActorContext<T> context) throws Exception {}
+
+  /**
+   * Decides what happens to a child of this actor that failed with {@code failure} (TASK-402).
+   *
+   * <p>Called on this actor's own dispatch thread — in strict turn with its own messages, never
+   * concurrently with {@link #onMessage} — whenever a child spawned via {@link ActorContext#spawn}
+   * throws from its {@link #preStart} or {@link #onMessage}. This makes it safe to read and write
+   * this actor's own fields here, the same as anywhere else in this actor (see {@code
+   * docs/decisions/ADR-005-jmm-review-sequential-processing.md} and {@code
+   * docs/decisions/ADR-008-supervision-strategies-and-actor-hierarchies.md}).
+   *
+   * <p>Defaults to {@link SupervisorDirective#STOP}, matching the fixed M1 default (TASK-107a) for
+   * any actor that does not override this. An actor with no parent of its own (spawned via {@link
+   * ActorSystem#spawn}) always resolves its <em>own</em> failure to {@code STOP} — this method is
+   * only ever consulted about a failing child, never about this actor itself.
+   */
+  default SupervisorDirective supervisorStrategy(Throwable failure) {
+    return SupervisorDirective.STOP;
+  }
 }

@@ -26,7 +26,11 @@ public interface ActorRef<T> {
    */
   void tell(T message);
 
-  /** A stable identifier for this actor, unique within its {@link ActorSystem}. */
+  /**
+   * A stable identifier for this actor, unique within its {@link ActorSystem}. A child actor
+   * (TASK-402, spawned via {@link ActorContext#spawn}) has its parent's id, then {@code /}, then
+   * its own name.
+   */
   String id();
 
   /** Whether the actor behind this reference has stopped. */

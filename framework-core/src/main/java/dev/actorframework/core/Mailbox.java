@@ -3,6 +3,7 @@ package dev.actorframework.core;
 import java.util.ArrayDeque;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 
 /**
  * The FIFO queue of messages waiting to be processed by a single actor (TASK-103).
@@ -108,12 +109,23 @@ final class Mailbox<T> {
    * discarded (TASK-107: queued-but-unprocessed messages are not delivered). Idempotent.
    */
   void close() {
+    close(discarded -> {});
+  }
+
+  /**
+   * Same as {@link #close()}, but calls {@code onDiscard} for each message still queued at closing
+   * time, in FIFO order, before it is discarded. Used by {@link ActorCell} (TASK-402) to resolve
+   * any pending child-failure report that would otherwise leave its reporting child blocked forever
+   * waiting for a supervisor that is gone.
+   */
+  void close(Consumer<T> onDiscard) {
     lock.lock();
     try {
       if (closed) {
         return;
       }
       closed = true;
+      queue.forEach(onDiscard);
       queue.clear();
       notFull.signalAll();
       notEmpty.signalAll();
