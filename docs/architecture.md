@@ -59,10 +59,14 @@ message as handed off, not shared, once sent. Full derivation in
 
 Each actor has its own `Mailbox<T>`, a FIFO queue.
 
-**Provisional bounds decision (TASK-103a):** the mailbox is bounded with a generous default
-capacity (1024) and blocks the sending thread when full ("block-on-full"). This is explicitly
-provisional — chosen only so early benchmarks are comparable — and is revisited with real
-measurement data at TASK-306 (M3). See `docs/decisions/mailbox-bounds-provisional.md`.
+**Bounds confirmed with benchmark data (TASK-306):** the mailbox is bounded with a default capacity
+of 1024 and blocks the sending thread when full ("block-on-full"). TASK-103a picked this only so
+early benchmarks would be comparable; TASK-306 built a dedicated benchmark to drive the mailbox to
+real backpressure (something TASK-301/302's realistic workloads never did) and confirmed both the
+policy and the specific capacity: throughput and blocking latency are invariant to capacity once
+saturated, and the current default costs only ~5.4 KB per actor even fully saturated. See
+`docs/decisions/ADR-007-mailbox-bounds-confirmed.md` (supersedes
+`docs/decisions/mailbox-bounds-provisional.md`).
 
 **Rejected message (TASK-203):** a rejected message is one offered to a mailbox that will never
 process it. Exactly three mechanisms produce a rejected message: `offer()` called after the

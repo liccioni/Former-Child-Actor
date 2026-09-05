@@ -45,6 +45,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       active workload).
  * </ul>
  *
+ * <p>A fourth scenario, added for TASK-306, isolates the specific question the mailbox-bounds
+ * decision needs answered: when a mailbox is actually filled to capacity, how much does the chosen
+ * capacity itself cost, independent of message payload size? It uses {@link BoundedBlockingMailbox}
+ * directly (not full actors) and a single shared sentinel object in every slot, so the measured
+ * delta is purely the backing array's cost at each capacity, not per-message allocation (which
+ * TASK-307's other scenarios already cover, and which varies by application payload anyway — not
+ * something the framework controls).
+ *
  * <p>Run via {@code ./gradlew :benchmarks:memoryFootprint}.
  */
 public final class MemoryFootprintHarness {
@@ -52,6 +60,10 @@ public final class MemoryFootprintHarness {
   private static final int ACTOR_COUNT = 10_000;
   private static final int TRIALS = 3;
   private static final int BURST_SIZE = 300; // > the mailbox's initial 256-slot backing array
+
+  private static final int MAILBOXES_FOR_SATURATION = 1_000;
+  private static final int[] SATURATION_CAPACITIES = {16, 128, 1024, 8192};
+  private static final Object SATURATION_SENTINEL = new Object();
 
   public static void main(String[] args) throws InterruptedException {
     System.out.println("TASK-307 memory footprint (best-effort, Runtime heap-delta sampling)");
@@ -61,6 +73,32 @@ public final class MemoryFootprintHarness {
     report("Empty actor (freshly spawned, no messages ever sent)", emptyActorScenario());
     report("Actor whose mailbox grew from a burst, now idle again", burstThenIdleScenario());
     report("Actor under sustained load (sampled live, no forced GC)", underLoadScenario());
+
+    System.out.println();
+    System.out.println(
+        "TASK-306: mailbox retained memory when actually filled to capacity (isolated mailbox,"
+            + " shared sentinel message, no actor)");
+    for (int capacity : SATURATION_CAPACITIES) {
+      report("  capacity=" + capacity, mailboxSaturationScenario(capacity));
+    }
+  }
+
+  private static long[] mailboxSaturationScenario(int capacity) {
+    long[] bytesPerMailbox = new long[TRIALS];
+    for (int trial = 0; trial < TRIALS; trial++) {
+      long before = usedMemoryAfterGc();
+      List<BoundedBlockingMailbox<Object>> mailboxes = new ArrayList<>(MAILBOXES_FOR_SATURATION);
+      for (int i = 0; i < MAILBOXES_FOR_SATURATION; i++) {
+        BoundedBlockingMailbox<Object> mailbox = new BoundedBlockingMailbox<>(capacity);
+        for (int m = 0; m < capacity; m++) {
+          mailbox.offer(SATURATION_SENTINEL);
+        }
+        mailboxes.add(mailbox);
+      }
+      long after = usedMemoryAfterGc();
+      bytesPerMailbox[trial] = (after - before) / mailboxes.size();
+    }
+    return bytesPerMailbox;
   }
 
   private static long[] emptyActorScenario() throws InterruptedException {

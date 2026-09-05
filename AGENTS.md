@@ -44,11 +44,11 @@ Write an ADR in `docs/decisions/` (see existing ADRs for the format) before chan
 following — these are decisions later milestones are built on top of, and changing them silently
 risks invalidating work upstream or downstream of the change:
 
-* **Mailbox bounds / backpressure policy.** The current bounded, block-on-full default
-  (`Mailbox.DEFAULT_CAPACITY`) is explicitly provisional (TASK-103a,
-  `docs/decisions/mailbox-bounds-provisional.md`) and is meant to be revisited *once*, with
-  benchmark data, at TASK-306. Don't change it casually before then; don't leave it unexamined
-  after M3 benchmarks land either.
+* **Mailbox bounds / backpressure policy.** The bounded, block-on-full default
+  (`Mailbox.DEFAULT_CAPACITY`) was provisional (TASK-103a,
+  `docs/decisions/mailbox-bounds-provisional.md`) and has since been confirmed with benchmark data
+  at TASK-306 (`docs/decisions/ADR-007-mailbox-bounds-confirmed.md`). It is no longer provisional —
+  any future change to it needs a new ADR that engages with ADR-007's data, not a silent edit.
 * **What happens to queued messages when an actor stops** (currently: discarded, not delivered).
 * **The dispatch strategy** (currently: one dedicated virtual thread per actor for its whole
   lifetime). Alternatives are evaluated with benchmarks at TASK-303 (M3), not swapped in ad hoc.

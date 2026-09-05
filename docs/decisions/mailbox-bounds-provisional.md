@@ -1,9 +1,11 @@
 # Provisional decision: mailbox bounds (TASK-103a)
 
-**This is not an ADR.** It is a placeholder decision, recorded so it is visible and so the M3
-benchmarks and the Day-1 experiment (Section 18 of the design document) measure a consistent,
-known policy instead of whatever was fastest to implement. It is superseded by TASK-306's own ADR
-(M3), once real benchmark data exists.
+**This is not an ADR. It is now superseded by
+[ADR-007](ADR-007-mailbox-bounds-confirmed.md) (TASK-306),** which confirms the decision recorded
+here with real benchmark data. This note is kept as the historical record of the placeholder
+decision; it was recorded so that the M3 benchmarks and the Day-1 experiment (Section 18 of the
+design document) would measure a consistent, known policy instead of whatever was fastest to
+implement.
 
 ## The decision
 
@@ -29,9 +31,10 @@ compare against later once TASK-306 changes the policy again.
   poison-message, and rejected-message semantics are formally specified in TASK-203's
   `docs/decisions/ADR-004-mailbox-overflow-poison-rejection-semantics.md`.
 
-## What happens next
+## What happened next
 
-TASK-306 (M3) revisits this in light of the M3 benchmarks (TASK-301, TASK-302, TASK-307) and
-either confirms or replaces it, written up as its own ADR. Until then, do not change this
-default without updating this note and flagging that the M3 benchmarks it fed may need
-re-running.
+TASK-306 (M3) revisited this in light of the M3 benchmarks (TASK-301, TASK-302, TASK-307) plus a
+new benchmark built specifically to drive the mailbox to real backpressure, since none of the
+existing ones did. **The decision recorded here is confirmed, not replaced:** bounded, block-on-
+full, capacity 1024. See [ADR-007](ADR-007-mailbox-bounds-confirmed.md) for the data and reasoning.
+Any future change to this default now needs its own ADR that engages with ADR-007's data.
