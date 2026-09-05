@@ -94,3 +94,17 @@ scope for this ADR — YAGNI until a caller exists that can observe the differen
 * Any future change to overflow policy (TASK-306), failure handling (TASK-402), or send semantics
   (`ask()`, M5) that alters what "poison message" or "rejected message" means must supersede this
   ADR explicitly, per the ADR-required list in `AGENTS.md`.
+
+## Resolved at TASK-402 (ADR-008)
+
+TASK-402 introduced configurable supervision, including `Directive.RESTART`, and — as flagged
+above — had to explicitly re-examine whether a restarted actor can receive the same poison message
+again. **It cannot.** This is not a policy choice TASK-402 made; it is mechanically guaranteed by
+`Mailbox` unchanged since M1: `Mailbox.take()` removes a message from the queue *before* returning
+it, and `onMessage` (or the failure it throws) only happens after that removal. By the time a
+failure occurs — and therefore by the time any `SupervisorStrategy`, including `RESTART`, is even
+consulted — the poison message is already gone from the mailbox. Restarting swaps the actor
+instance and resumes consumption with whatever is next in the queue, if anything; there is nothing
+left to redeliver. The "processed at most once, never redelivered" guarantee above holds unchanged
+by `RESTART`, and no longer needs the "this guarantee holds only through M1–M3" caveat. See
+`docs/decisions/ADR-008-supervision-strategies-and-hierarchies.md` for full supervision semantics.
