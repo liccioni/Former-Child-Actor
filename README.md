@@ -4,7 +4,7 @@ A small, understandable Java runtime for systems built from independent, statefu
 that communicate through messages — starting as a single-process library, with room to grow
 into a distributed runtime later without changing the application's programming model.
 
-This repository is in **M5 (Ask Pattern)**. See
+This repository is in **M6 (Death Watch)**. See
 [`docs/architecture.md`](docs/architecture.md) for the full roadmap and design philosophy.
 
 ## Requirements

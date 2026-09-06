@@ -1,6 +1,6 @@
 # Architecture
 
-Status: living document, updated as milestones land. Current milestone: **M5 — Ask Pattern**.
+Status: living document, updated as milestones land. Current milestone: **M6 — Death Watch**.
 
 ## 1. Actor model
 
@@ -180,6 +180,22 @@ to the returned stage runs on whichever thread completes it — never guaranteed
 actor's own dispatcher thread. Touching that actor's own state from such a callback would violate
 the single-thread-per-actor guarantee (§3); the safe pattern is to pipe the result back via
 `self.tell(...)` and only act on it from `onMessage`.
+
+## 10. Death watch (M6)
+
+`ActorContext.watch(target, onTerminated)` lets any actor — not only a parent watching its own
+child — be notified when another actor in the same `ActorSystem` terminates. `onTerminated` is an
+ordinary, caller-supplied message of this actor's own type `T`, enqueued to this actor's mailbox
+exactly once the moment `target` stops, for any reason: an explicit stop, an uncaught failure whose
+`SupervisorStrategy` decides `Stop` or `Escalate`, or a cascade reaching it. `ActorContext.unwatch`
+cancels a pending watch.
+
+A `Restart` never fires a watch — the actor's identity survives a restart untouched. Delivery
+reuses `tell()`'s existing contract, including its silent-drop-if-the-recipient-has-already-stopped
+behavior: an actor watching itself never actually receives the notification, since its own mailbox
+is already closed by the time it finishes terminating, but it still terminates cleanly. See
+`docs/decisions/ADR-016-death-watch.md` for the full semantics, including the exactly-once
+delivery mechanism and the actor-id-reuse hazard `watch`/`unwatch` guard against.
 
 ## Roadmap
 

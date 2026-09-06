@@ -36,6 +36,7 @@ final class ActorCell<T> {
   private final AtomicBoolean stopRequested = new AtomicBoolean(false);
   private final AtomicBoolean terminated = new AtomicBoolean(false);
   private final Set<ActorCell<?>> children = ConcurrentHashMap.newKeySet();
+  private final ConcurrentHashMap<ActorRef<?>, Object> watchedBy = new ConcurrentHashMap<>();
 
   ActorCell(
       ActorSystem system,
@@ -203,7 +204,40 @@ final class ActorCell<T> {
   private void finishTermination() {
     safelyRun(() -> actor.postStop(context), "postStop");
     terminated.set(true);
+    for (ActorRef<?> watcher : watchedBy.keySet()) {
+      notifyWatcherIfPresent(watcher);
+    }
     system.deregister(this);
+  }
+
+  /** Death watch (M6, ADR-016): registers {@code watcher} to be sent {@code message} on stop. */
+  void addWatcher(ActorRef<?> watcher, Object message) {
+    watchedBy.put(watcher, message);
+  }
+
+  /** Death watch (M6, ADR-016): cancels a previously registered watch, if still pending. */
+  void removeWatcher(ActorRef<?> watcher) {
+    watchedBy.remove(watcher);
+  }
+
+  /**
+   * Death watch (M6, ADR-016): delivers {@code watcher}'s pending message, if it still has one.
+   * Used both by {@link #finishTermination()} and by {@link ActorSystem#watch} to close the race
+   * between a late watch and this cell's own concurrent termination. {@link
+   * ConcurrentHashMap#remove} is the exactly-once mechanism: whichever caller's {@code remove}
+   * actually returns the message is the one that delivers it — the other sees {@code null} and does
+   * nothing.
+   */
+  void notifyWatcherIfPresent(ActorRef<?> watcher) {
+    Object message = watchedBy.remove(watcher);
+    if (message != null) {
+      deliver(watcher, message);
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private static void deliver(ActorRef<?> ref, Object message) {
+    ((ActorRef<Object>) ref).tell(message);
   }
 
   private void safelyRun(ThrowingAction action, String hookName) {
@@ -259,6 +293,16 @@ final class ActorCell<T> {
     public <C> ActorRef<C> spawnChild(
         Supplier<Actor<C>> childFactory, String name, SupervisorStrategy childStrategy) {
       return system.spawnChild(ActorCell.this, childFactory, name, childStrategy);
+    }
+
+    @Override
+    public void watch(ActorRef<?> target, T onTerminated) {
+      system.watch(target, ref, onTerminated);
+    }
+
+    @Override
+    public void unwatch(ActorRef<?> target) {
+      system.unwatch(target, ref);
     }
   }
 }
