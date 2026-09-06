@@ -198,6 +198,47 @@ public final class ActorSystem implements AutoCloseable {
   }
 
   /**
+   * Death watch (M6, {@code docs/decisions/ADR-016-death-watch.md}): registers {@code watcher} to
+   * be sent {@code message} once {@code target} terminates, called from {@link ActorContext#watch}.
+   *
+   * <p>Looks {@code target} up by id, like {@link #stop}, but additionally checks {@code
+   * targetCell.ref() == target}: an actor's name can be reused once the actor that held it has
+   * fully terminated and deregistered, so an id match alone is not enough to know {@code target} is
+   * still the actor this call means to watch. If the cell is missing or belongs to a different
+   * actor now, {@code target} is treated as already gone and {@code message} is delivered
+   * immediately, same as a target found to have already terminated below.
+   */
+  void watch(ActorRef<?> target, ActorRef<?> watcher, Object message) {
+    ActorCell<?> targetCell = actors.get(target.id());
+    if (targetCell == null || targetCell.ref() != target) {
+      deliver(watcher, message);
+      return;
+    }
+    targetCell.addWatcher(watcher, message);
+    if (target.isTerminated()) {
+      // Closes the race between this registration and the target's own concurrent termination
+      // (ActorCell.finishTermination() may have already iterated watchedBy without seeing us, or
+      // may not have started yet) - see notifyWatcherIfPresent's javadoc for why this is safe.
+      targetCell.notifyWatcherIfPresent(watcher);
+    }
+  }
+
+  /**
+   * Death watch (M6, ADR-016): cancels a previous watch, called from {@link ActorContext#unwatch}.
+   */
+  void unwatch(ActorRef<?> target, ActorRef<?> watcher) {
+    ActorCell<?> targetCell = actors.get(target.id());
+    if (targetCell != null && targetCell.ref() == target) {
+      targetCell.removeWatcher(watcher);
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private static void deliver(ActorRef<?> ref, Object message) {
+    ((ActorRef<Object>) ref).tell(message);
+  }
+
+  /**
    * Stops accepting new actors and requests that every currently running actor stop. Does not
    * block; use {@link #close()} to also wait for shutdown to complete.
    */
