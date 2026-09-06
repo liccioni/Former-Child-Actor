@@ -1,6 +1,6 @@
 # Architecture
 
-Status: living document, updated as milestones land. Current milestone: **M4 — Supervision**.
+Status: living document, updated as milestones land. Current milestone: **M5 — Ask Pattern**.
 
 ## 1. Actor model
 
@@ -155,7 +155,31 @@ re-supervision on `Escalate`).
   (`ActorContext.spawnChild`); a plain top-level actor still behaves exactly like M1's fixed
   default, with nothing extra to learn or configure.
 * No API is finalized until proven through implementation and tests — in particular, `ask()`
-  does not exist yet; it is designed in ADR-015 (M5) before it is added.
+  was not added until it was designed in ADR-015 (M5); see §9, below.
+
+## 9. Request-response messaging: `ask()` (M5)
+
+`ActorSystem.ask(target, messageFactory, timeout)` sends `target` a message built by
+`messageFactory` — which is handed a reply-to `ActorRef` to embed in it — and returns a
+`CompletionStage` of whatever is sent to that reply-to ref. Internally this spawns a small one-shot
+actor to receive the reply; nothing about `tell()`, `Mailbox`, or supervision changes to support it.
+
+Two failure shapes, deliberately not a richer taxonomy (see
+`docs/decisions/ADR-015-ask-pattern.md`):
+
+* **`AskFailedException`** — for a failure known up front, not "no reply yet": `target` was already
+  terminated when asked, or the reply channel itself was torn down (e.g. by
+  `ActorSystem.close()`/`shutdown()`) before a reply arrived.
+* **`java.util.concurrent.TimeoutException`** — everything else: a slow-but-alive target, a request
+  a supervised `RESTART` silently dropped (§7), a target stopped by a supervision cascade (§6), or a
+  target that terminates in the narrow window between `ask()`'s upfront check and actual delivery
+  (an accepted, unobservable race — the same shape as §4's rejected-message gap for `tell()`).
+
+`ask()` is reachable from inside an actor via `context.system().ask(...)`, but a callback attached
+to the returned stage runs on whichever thread completes it — never guaranteed to be the calling
+actor's own dispatcher thread. Touching that actor's own state from such a callback would violate
+the single-thread-per-actor guarantee (§3); the safe pattern is to pipe the result back via
+`self.tell(...)` and only act on it from `onMessage`.
 
 ## Roadmap
 

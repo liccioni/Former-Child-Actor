@@ -1,9 +1,14 @@
 package dev.actorframework.core;
 
+import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -112,6 +117,76 @@ public final class ActorSystem implements AutoCloseable {
   }
 
   /**
+   * Sends {@code target} a message built by {@code messageFactory} and returns a {@link
+   * CompletionStage} of its reply (M5, {@code docs/decisions/ADR-015-ask-pattern.md}). {@code
+   * messageFactory} is given a reply-to {@link ActorRef} to embed in the outgoing message; whatever
+   * the first message sent to that reply-to ref is becomes the stage's result.
+   *
+   * <p>Fails fast with {@link AskFailedException}, without sending anything, if {@code target} has
+   * already terminated — but a target that terminates in the window between that check and actual
+   * delivery is indistinguishable from a slow-but-alive one: this only ever completes exceptionally
+   * with {@link AskFailedException} for a case knowable up front, never for "no reply yet". Every
+   * other way a reply might never come (a slow target, a request dropped by a supervised restart, a
+   * target stopped by a supervision cascade, ...) surfaces uniformly as a {@link
+   * java.util.concurrent.TimeoutException} once {@code timeout} elapses — see ADR-015 for why this
+   * is deliberately not a richer failure taxonomy.
+   *
+   * @throws IllegalArgumentException if {@code timeout} is not positive
+   * @throws IllegalStateException if this system is shutting down (same as {@link #spawn})
+   */
+  public <REQ, RES> CompletionStage<RES> ask(
+      ActorRef<REQ> target, Function<ActorRef<RES>, REQ> messageFactory, Duration timeout) {
+    if (timeout.isNegative() || timeout.isZero()) {
+      throw new IllegalArgumentException("timeout must be positive: " + timeout);
+    }
+    if (target.isTerminated()) {
+      return CompletableFuture.failedFuture(
+          new AskFailedException("Cannot ask '" + target.id() + "': it has already terminated"));
+    }
+    CompletableFuture<RES> future = new CompletableFuture<>();
+    ActorRef<RES> replyTo = spawn(() -> new AskReplyActor<>(future));
+    // Fires exactly once, however `future` ends up completed (a real reply, postStop's catch-all
+    // below, or orTimeout() itself) — complete()/completeExceptionally() are no-ops once a future
+    // is already completed, so there is no double-completion hazard here.
+    future.whenComplete((result, error) -> stop(replyTo));
+    target.tell(messageFactory.apply(replyTo));
+    return future.orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
+  }
+
+  /**
+   * The one-shot reply channel behind {@link #ask}: completes {@code future} with the first (and
+   * only) message it ever receives, then stops itself.
+   */
+  private static final class AskReplyActor<RES> implements Actor<RES> {
+    private final CompletableFuture<RES> future;
+
+    AskReplyActor(CompletableFuture<RES> future) {
+      this.future = future;
+    }
+
+    @Override
+    public void onMessage(ActorContext<RES> context, RES message) {
+      future.complete(message);
+      // Races harmlessly with the whenComplete-triggered stop() above: ActorCell.requestStop() is
+      // a no-op past its first call.
+      context.system().stop(context.self());
+    }
+
+    /**
+     * Runs whenever this actor stops, for any reason. On the happy path {@code future} is already
+     * complete by the time this runs, making this a documented no-op; the one path that actually
+     * needs it is {@link ActorSystem#close()}/{@link ActorSystem#shutdown()} running while this ask
+     * is still pending, which would otherwise leave the returned stage incomplete forever.
+     */
+    @Override
+    public void postStop(ActorContext<RES> context) {
+      future.completeExceptionally(
+          new AskFailedException(
+              "The reply channel for this ask() stopped before a reply arrived"));
+    }
+  }
+
+  /**
    * Requests that the actor behind {@code ref} stop. See {@link ActorRef} for termination
    * semantics. A no-op if the actor does not belong to this system or has already stopped.
    */
@@ -152,5 +227,10 @@ public final class ActorSystem implements AutoCloseable {
     if (parentCell != null) {
       parentCell.children().remove(cell);
     }
+  }
+
+  /** Test support only: the number of currently-registered actors, top-level and children alike. */
+  int registeredActorCount() {
+    return actors.size();
   }
 }

@@ -65,6 +65,11 @@ risks invalidating work upstream or downstream of the change:
   M10's real security work (TASK-1007), no transport or cluster component may bind to anything
   other than localhost by default, and none may be documented or marketed as safe for an
   untrusted network.
+* **`ask()`'s failure taxonomy** (currently: exactly two shapes — `AskFailedException` for a
+  synchronously/structurally knowable failure, a plain `TimeoutException` for everything else, no
+  distinction between why a timeout happened). See
+  `docs/decisions/ADR-015-ask-pattern.md`; any future change to what either failure shape covers
+  needs a new ADR that engages with it, not a silent edit.
 * Any decision listed in the ADR table in the original design document that hasn't been written
   yet for the milestone currently in progress.
 
