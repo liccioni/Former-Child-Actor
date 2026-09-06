@@ -108,3 +108,16 @@ instance and resumes consumption with whatever is next in the queue, if anything
 left to redeliver. The "processed at most once, never redelivered" guarantee above holds unchanged
 by `RESTART`, and no longer needs the "this guarantee holds only through M1–M3" caveat. See
 `docs/decisions/ADR-008-supervision-strategies-and-hierarchies.md` for full supervision semantics.
+
+## Resolved at M5 (ADR-015)
+
+`ask()` — the future signaled send path this ADR's §3 flagged as possibly needing the three-way
+rejection taxonomy — has now been designed and built. **It doesn't need it.** `ask()` exposes
+exactly two outcomes beyond a normal reply: a synchronously-knowable `AskFailedException` (the
+target was already terminated when asked, or its reply channel was torn down by an
+`ActorSystem.close()`/`shutdown()` before a reply arrived) and a plain `TimeoutException` for
+everything else — including all three rejection mechanisms above, a slow-but-alive target, and a
+request a supervised `RESTART` silently dropped. The three-way split remains exactly as
+unobservable to `ask()`'s caller as it always was to `tell()`'s: `ask()` only ever distinguishes
+"known dead now" from "no reply yet," never *why* a rejection happened. No `Mailbox` change was
+needed. See `docs/decisions/ADR-015-ask-pattern.md` for the full design.
