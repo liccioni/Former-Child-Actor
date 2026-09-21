@@ -64,7 +64,8 @@ public final class ActorSystem implements AutoCloseable {
       throw new IllegalStateException(
           "Cannot spawn actor '" + name + "': ActorSystem '" + this.name + "' is shutting down");
     }
-    ActorCell<T> cell = new ActorCell<>(this, name, factory, null, SupervisorStrategy.stop());
+    ActorCell<T> cell =
+        new ActorCell<>(this, name, factory, null, SupervisorStrategy.stop(), null, null);
     if (actors.putIfAbsent(name, cell) != null) {
       throw new IllegalArgumentException("An actor named '" + name + "' already exists");
     }
@@ -102,7 +103,7 @@ public final class ActorSystem implements AutoCloseable {
               + "' is stopping");
     }
     String id = parentCell.id() + "/" + name;
-    ActorCell<C> cell = new ActorCell<>(this, id, factory, parentCell, strategy);
+    ActorCell<C> cell = new ActorCell<>(this, id, factory, parentCell, strategy, null, null);
     if (actors.putIfAbsent(id, cell) != null) {
       throw new IllegalArgumentException("An actor named '" + id + "' already exists");
     }

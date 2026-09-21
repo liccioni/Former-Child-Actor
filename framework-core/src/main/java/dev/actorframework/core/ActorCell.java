@@ -3,7 +3,9 @@ package dev.actorframework.core;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -29,6 +31,8 @@ final class ActorCell<T> {
   private final Supplier<Actor<T>> factory;
   private final ActorCell<?> parent;
   private final SupervisorStrategy strategy;
+  private final Journal journal;
+  private final MessageCodec<T> codec;
   private Actor<T> actor;
   private final Mailbox<T> mailbox = new Mailbox<>();
   private final ActorRefImpl ref = new ActorRefImpl();
@@ -42,12 +46,16 @@ final class ActorCell<T> {
       String id,
       Supplier<Actor<T>> factory,
       ActorCell<?> parent,
-      SupervisorStrategy strategy) {
+      SupervisorStrategy strategy,
+      Journal journal,
+      MessageCodec<T> codec) {
     this.system = system;
     this.id = id;
     this.factory = factory;
     this.parent = parent;
     this.strategy = strategy;
+    this.journal = journal;
+    this.codec = codec;
     this.actor = factory.get();
   }
 
@@ -108,9 +116,30 @@ final class ActorCell<T> {
     finishTermination();
   }
 
+  /**
+   * Drains a journal-replay iterator first (TASK-601), then falls through to the mailbox — one
+   * loop, not two, so every {@link SupervisorStrategy} directive and the poison-message guarantee
+   * (ADR-004) apply unchanged whether a message came from replay or is live. A corrupt record or an
+   * I/O failure while recovering or journaling is a fatal recovery error, not an actor failure:
+   * logged and the actor stops immediately, without consulting {@link #strategy}. See {@code
+   * docs/decisions/ADR-016-durable-actor-journal-and-recovery.md}.
+   */
   private void dispatchLoop() {
+    Iterator<T> recovery;
+    try {
+      recovery = journal != null ? replayIterator() : Collections.emptyIterator();
+    } catch (RuntimeException e) {
+      logRecoveryFailure(e);
+      return;
+    }
     while (true) {
-      T message = mailbox.take();
+      T message;
+      try {
+        message = nextMessage(recovery);
+      } catch (RuntimeException e) {
+        logRecoveryFailure(e);
+        return;
+      }
       if (message == null) {
         // Mailbox closed (explicit stop) and drained: exit without a failure.
         return;
@@ -123,6 +152,45 @@ final class ActorCell<T> {
         }
       }
     }
+  }
+
+  /**
+   * Returns the next replayed record if any remain, otherwise the next live mailbox message
+   * (journaling it write-ahead — before {@code onMessage} runs — if this actor is persistent).
+   * {@code null} means the mailbox is closed and drained.
+   */
+  private T nextMessage(Iterator<T> recovery) {
+    if (recovery.hasNext()) {
+      return recovery.next();
+    }
+    T message = mailbox.take();
+    if (message != null && journal != null) {
+      journal.append(codec.encode(message));
+    }
+    return message;
+  }
+
+  /** Reads this actor's whole journal once and decodes it lazily, one record per {@code next()}. */
+  private Iterator<T> replayIterator() {
+    Iterator<byte[]> raw = journal.readAll().iterator();
+    return new Iterator<>() {
+      @Override
+      public boolean hasNext() {
+        return raw.hasNext();
+      }
+
+      @Override
+      public T next() {
+        return codec.decode(raw.next());
+      }
+    };
+  }
+
+  private void logRecoveryFailure(RuntimeException failure) {
+    LOG.log(
+        Level.ERROR,
+        "Actor '" + id + "' failed to recover or journal a message; stopping.",
+        failure);
   }
 
   /**
@@ -202,6 +270,9 @@ final class ActorCell<T> {
 
   private void finishTermination() {
     safelyRun(() -> actor.postStop(context), "postStop");
+    if (journal != null) {
+      safelyRun(journal::close, "journal close");
+    }
     terminated.set(true);
     system.deregister(this);
   }
