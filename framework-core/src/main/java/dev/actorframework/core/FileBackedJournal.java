@@ -37,7 +37,22 @@ final class FileBackedJournal implements Journal {
       file.seek(0);
       long length = file.length();
       while (file.getFilePointer() < length) {
+        long recordStart = file.getFilePointer();
+        if (length - recordStart < Integer.BYTES) {
+          // A process was killed mid-append, after only part of the 4-byte length header was
+          // flushed. Discard the incomplete tail rather than fail recovery permanently — a
+          // torn trailing write is exactly the crash this journal exists to survive.
+          file.setLength(recordStart);
+          break;
+        }
         int recordLength = file.readInt();
+        if (recordLength < 0 || length - file.getFilePointer() < recordLength) {
+          // The length header itself was flushed, but its payload wasn't (or was only partly
+          // written) before the crash. Same recovery as above: discard the torn tail, keep
+          // every complete record read so far.
+          file.setLength(recordStart);
+          break;
+        }
         byte[] record = new byte[recordLength];
         file.readFully(record);
         records.add(record);

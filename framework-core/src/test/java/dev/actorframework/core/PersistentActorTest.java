@@ -62,6 +62,7 @@ class PersistentActorTest {
       assertEquals(1, recordsSeenInsideOnMessage.get());
 
       proceed.countDown();
+      cell.requestStop();
       dispatcherThread.join(Duration.ofSeconds(2).toMillis());
     }
   }
@@ -260,6 +261,52 @@ class PersistentActorTest {
       awaitTerminated(cell.ref(), Duration.ofSeconds(2));
       dispatcherThread.join(Duration.ofSeconds(2).toMillis());
       assertFalse(strategyConsulted.get());
+    }
+  }
+
+  @Test
+  void aLiveMessageAppendFailureStopsTheActorWithoutConsultingSupervisorStrategy()
+      throws InterruptedException {
+    AtomicBoolean strategyConsulted = new AtomicBoolean(false);
+    SupervisorStrategy spyStrategy =
+        failure -> {
+          strategyConsulted.set(true);
+          return Directive.STOP;
+        };
+    AtomicBoolean onMessageCalled = new AtomicBoolean(false);
+    Journal explodingOnAppendJournal =
+        new Journal() {
+          @Override
+          public void append(byte[] record) {
+            throw new java.io.UncheckedIOException(new java.io.IOException("disk full"));
+          }
+
+          @Override
+          public List<byte[]> readAll() {
+            return List.of();
+          }
+        };
+    StringCodec codec = new StringCodec();
+
+    try (ActorSystem system = ActorSystem.start("test")) {
+      ActorCell<String> cell =
+          new ActorCell<>(
+              system,
+              "append-failure",
+              () -> (context, message) -> onMessageCalled.set(true),
+              null,
+              spyStrategy,
+              explodingOnAppendJournal,
+              codec);
+      Thread dispatcherThread = new Thread(cell::run);
+      dispatcherThread.start();
+
+      cell.ref().tell("hello");
+
+      awaitTerminated(cell.ref(), Duration.ofSeconds(2));
+      dispatcherThread.join(Duration.ofSeconds(2).toMillis());
+      assertFalse(strategyConsulted.get());
+      assertFalse(onMessageCalled.get());
     }
   }
 

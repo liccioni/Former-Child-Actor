@@ -101,7 +101,12 @@ final class ActorCell<T> {
     }
   }
 
-  /** Entry point for this actor's dispatcher thread. */
+  /**
+   * Entry point for this actor's dispatcher thread. {@code finishTermination()} always runs, even
+   * if {@code dispatchLoop()} throws something not already caught internally (e.g. an {@link
+   * Error}) — otherwise this cell would never close its journal, deregister itself, or mark itself
+   * terminated.
+   */
   void run() {
     boolean started;
     try {
@@ -110,10 +115,13 @@ final class ActorCell<T> {
     } catch (Throwable t) {
       started = handleFailureAndDecideContinue(t, null);
     }
-    if (started) {
-      dispatchLoop();
+    try {
+      if (started) {
+        dispatchLoop();
+      }
+    } finally {
+      finishTermination();
     }
-    finishTermination();
   }
 
   /**
