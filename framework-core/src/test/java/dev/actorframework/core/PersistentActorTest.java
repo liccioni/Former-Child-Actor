@@ -3,9 +3,13 @@ package dev.actorframework.core;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -15,7 +19,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * TASK-601: durable per-actor journaling and recovery on restart. Persistence-facing {@link
@@ -303,6 +309,87 @@ class PersistentActorTest {
 
     int size() {
       return records.size();
+    }
+  }
+
+  @Test
+  void aPersistentActorsStateSurvivesASimulatedProcessRestart(@TempDir Path tempDir)
+      throws InterruptedException {
+    StringCodec codec = new StringCodec();
+    List<String> firstRunEvents = new CopyOnWriteArrayList<>();
+
+    try (ActorSystem systemA = ActorSystem.start("test", JournalStore.fileBacked(tempDir))) {
+      ActorRef<String> counter =
+          systemA.spawn(() -> new RecordingActor(firstRunEvents), "counter", codec);
+      counter.tell("a");
+      counter.tell("b");
+      counter.tell("c");
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(2),
+          () -> {
+            while (firstRunEvents.size() < 3) {
+              Thread.sleep(5);
+            }
+          });
+    }
+
+    List<String> secondRunEvents = new CopyOnWriteArrayList<>();
+    try (ActorSystem systemB = ActorSystem.start("test", JournalStore.fileBacked(tempDir))) {
+      systemB.spawn(() -> new RecordingActor(secondRunEvents), "counter", codec);
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(2),
+          () -> {
+            while (secondRunEvents.size() < 3) {
+              Thread.sleep(5);
+            }
+          });
+      assertEquals(List.of("a", "b", "c"), secondRunEvents);
+    }
+  }
+
+  @Test
+  void spawningAPersistentActorWithoutAConfiguredStoreThrows() {
+    try (ActorSystem system = ActorSystem.start("test")) {
+      assertThrows(
+          IllegalStateException.class,
+          () -> system.spawn(() -> (context, message) -> {}, "no-store", new StringCodec()));
+    }
+  }
+
+  @Test
+  void nonPersistentSpawnOverloadsAreUnaffectedByAConfiguredStore(@TempDir Path tempDir)
+      throws InterruptedException, IOException {
+    try (ActorSystem system = ActorSystem.start("test", JournalStore.fileBacked(tempDir))) {
+      List<String> received = new CopyOnWriteArrayList<>();
+      ActorRef<String> plain = system.spawn(() -> (context, message) -> received.add(message));
+
+      plain.tell("hello");
+
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(2),
+          () -> {
+            while (received.isEmpty()) {
+              Thread.sleep(5);
+            }
+          });
+      assertEquals(List.of("hello"), received);
+      try (Stream<Path> entries = Files.list(tempDir)) {
+        assertTrue(entries.findAny().isEmpty());
+      }
+    }
+  }
+
+  /** Records every message it processes, in order — used to observe replayed history. */
+  private static final class RecordingActor implements Actor<String> {
+    private final List<String> events;
+
+    RecordingActor(List<String> events) {
+      this.events = events;
+    }
+
+    @Override
+    public void onMessage(ActorContext<String> context, String message) {
+      events.add(message);
     }
   }
 }

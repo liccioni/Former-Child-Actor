@@ -30,9 +30,11 @@ public final class ActorSystem implements AutoCloseable {
   private final Map<String, ActorCell<?>> actors = new ConcurrentHashMap<>();
   private final AtomicLong anonymousActorCount = new AtomicLong();
   private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
+  private final JournalStore store;
 
-  private ActorSystem(String name) {
+  private ActorSystem(String name, JournalStore store) {
     this.name = name;
+    this.store = store;
     this.dispatcher = new Dispatcher();
   }
 
@@ -41,7 +43,22 @@ public final class ActorSystem implements AutoCloseable {
   }
 
   public static ActorSystem start(String name) {
-    return new ActorSystem(name);
+    return new ActorSystem(name, null);
+  }
+
+  /**
+   * Starts a system configured with {@code store} for persistent actors (TASK-601): an actor opts
+   * into journaling by being spawned via {@link #spawn(Supplier, String, MessageCodec)}. {@link
+   * #spawn(Supplier)}/{@link #spawn(Supplier, String)} are unaffected — non-persistent actors never
+   * touch {@code store}. See {@code docs/decisions/ADR-016-durable-actor-journal-and-recovery.md}.
+   *
+   * @throws IllegalArgumentException if {@code store} is {@code null}
+   */
+  public static ActorSystem start(String name, JournalStore store) {
+    if (store == null) {
+      throw new IllegalArgumentException("store must not be null");
+    }
+    return new ActorSystem(name, store);
   }
 
   public String name() {
@@ -67,6 +84,45 @@ public final class ActorSystem implements AutoCloseable {
     ActorCell<T> cell =
         new ActorCell<>(this, name, factory, null, SupervisorStrategy.stop(), null, null);
     if (actors.putIfAbsent(name, cell) != null) {
+      throw new IllegalArgumentException("An actor named '" + name + "' already exists");
+    }
+    dispatcher.execute(cell::run);
+    return cell.ref();
+  }
+
+  /**
+   * Spawns a new persistent top-level actor with the given name (TASK-601): passing {@code codec}
+   * opts it into journaling via this system's configured {@link JournalStore}. On spawn, the
+   * actor's journal (if any records exist) is replayed via {@code onMessage} before any live
+   * message is processed, reconstructing its history from previous runs. Every live message is
+   * durably appended to the journal <em>before</em> {@code onMessage} runs (write-ahead), so it
+   * survives a process restart even if processing was interrupted mid-message. Existing {@link
+   * #spawn(Supplier)}/{@link #spawn(Supplier, String)} overloads are unaffected — an actor spawned
+   * through them never touches a journal. See {@code
+   * docs/decisions/ADR-016-durable-actor-journal-and-recovery.md}.
+   *
+   * @throws IllegalStateException if this system has no configured {@link JournalStore}, or is
+   *     shutting down
+   * @throws IllegalArgumentException if an actor with this name already exists
+   */
+  public <T> ActorRef<T> spawn(Supplier<Actor<T>> factory, String name, MessageCodec<T> codec) {
+    if (store == null) {
+      throw new IllegalStateException(
+          "Cannot spawn persistent actor '"
+              + name
+              + "': ActorSystem '"
+              + this.name
+              + "' has no configured JournalStore");
+    }
+    if (shuttingDown.get()) {
+      throw new IllegalStateException(
+          "Cannot spawn actor '" + name + "': ActorSystem '" + this.name + "' is shutting down");
+    }
+    Journal journal = store.open(name);
+    ActorCell<T> cell =
+        new ActorCell<>(this, name, factory, null, SupervisorStrategy.stop(), journal, codec);
+    if (actors.putIfAbsent(name, cell) != null) {
+      journal.close();
       throw new IllegalArgumentException("An actor named '" + name + "' already exists");
     }
     dispatcher.execute(cell::run);
@@ -220,6 +276,9 @@ public final class ActorSystem implements AutoCloseable {
   public void close() {
     shutdown();
     dispatcher.close();
+    if (store != null) {
+      store.close();
+    }
   }
 
   void deregister(ActorCell<?> cell) {
