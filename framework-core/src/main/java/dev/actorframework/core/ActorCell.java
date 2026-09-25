@@ -129,15 +129,15 @@ final class ActorCell<T> {
    * loop, not two, so every {@link SupervisorStrategy} directive and the poison-message guarantee
    * (ADR-004) apply unchanged whether a message came from replay or is live. A corrupt record or an
    * I/O failure while recovering or journaling is a fatal recovery error, not an actor failure:
-   * logged and the actor stops immediately, without consulting {@link #strategy}. See {@code
-   * docs/decisions/ADR-016-durable-actor-journal-and-recovery.md}.
+   * logged and the actor stops immediately via {@link #requestStop()} (#47), without consulting
+   * {@link #strategy}. See {@code docs/decisions/ADR-016-durable-actor-journal-and-recovery.md}.
    */
   private void dispatchLoop() {
     Iterator<T> recovery;
     try {
       recovery = journal != null ? replayIterator() : Collections.emptyIterator();
     } catch (RuntimeException e) {
-      logRecoveryFailure(e);
+      stopAfterRecoveryFailure(e);
       return;
     }
     while (true) {
@@ -145,7 +145,7 @@ final class ActorCell<T> {
       try {
         message = nextMessage(recovery);
       } catch (RuntimeException e) {
-        logRecoveryFailure(e);
+        stopAfterRecoveryFailure(e);
         return;
       }
       if (message == null) {
@@ -168,7 +168,9 @@ final class ActorCell<T> {
    * {@code null} means the mailbox is closed and drained.
    */
   private T nextMessage(Iterator<T> recovery) {
-    if (recovery.hasNext()) {
+    // A stop requested mid-replay takes effect after the current record, the same as for live
+    // messages (#49); the mailbox is already closed, so take() below returns null.
+    if (!stopRequested.get() && recovery.hasNext()) {
       return recovery.next();
     }
     T message = mailbox.take();
@@ -194,11 +196,17 @@ final class ActorCell<T> {
     };
   }
 
-  private void logRecoveryFailure(RuntimeException failure) {
+  /**
+   * Logs a fatal recovery/journal failure and stops this actor through {@link #requestStop()}, like
+   * every other exit path — closing the mailbox releases any sender blocked on it, and the stop
+   * cascades to children (#47).
+   */
+  private void stopAfterRecoveryFailure(RuntimeException failure) {
     LOG.log(
         Level.ERROR,
         "Actor '" + id + "' failed to recover or journal a message; stopping.",
         failure);
+    requestStop();
   }
 
   /**

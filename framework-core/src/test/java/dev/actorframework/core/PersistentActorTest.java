@@ -19,6 +19,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -307,6 +308,162 @@ class PersistentActorTest {
       dispatcherThread.join(Duration.ofSeconds(2).toMillis());
       assertFalse(strategyConsulted.get());
       assertFalse(onMessageCalled.get());
+    }
+  }
+
+  /**
+   * Regression test for #47: a journal failure must stop the actor the same way every other exit
+   * path does — closing its mailbox (releasing senders blocked on a full one) and cascading the
+   * stop to its children — not just log and return.
+   */
+  @Test
+  void aJournalFailureReleasesBlockedSendersAndStopsChildren() throws InterruptedException {
+    CountDownLatch appendEntered = new CountDownLatch(1);
+    CountDownLatch failAppend = new CountDownLatch(1);
+    Journal blockThenFailJournal =
+        new Journal() {
+          @Override
+          public void append(byte[] record) {
+            appendEntered.countDown();
+            try {
+              failAppend.await();
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+            }
+            throw new java.io.UncheckedIOException(new java.io.IOException("disk full"));
+          }
+
+          @Override
+          public List<byte[]> readAll() {
+            return List.of();
+          }
+        };
+    AtomicReference<ActorRef<String>> child = new AtomicReference<>();
+
+    try (ActorSystem system = ActorSystem.start("test", actorId -> blockThenFailJournal)) {
+      ActorRef<String> parent =
+          system.spawn(
+              () ->
+                  new Actor<String>() {
+                    @Override
+                    public void preStart(ActorContext<String> context) {
+                      child.set(context.spawnChild(() -> (ctx, message) -> {}, "child"));
+                    }
+
+                    @Override
+                    public void onMessage(ActorContext<String> context, String message) {}
+                  },
+              "failing-journal",
+              new StringCodec());
+
+      parent.tell("first");
+      assertTrue(appendEntered.await(2, TimeUnit.SECONDS));
+      // The dispatcher is now stuck inside append(); fill the mailbox, then block one more sender.
+      Thread sender =
+          new Thread(
+              () -> {
+                for (int i = 0; i <= Mailbox.DEFAULT_CAPACITY; i++) {
+                  parent.tell("m" + i);
+                }
+              });
+      sender.setDaemon(true);
+      sender.start();
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(2),
+          () -> {
+            while (sender.getState() != Thread.State.WAITING) {
+              Thread.sleep(5);
+            }
+          });
+
+      failAppend.countDown();
+
+      awaitTerminated(parent, Duration.ofSeconds(2));
+      sender.join(Duration.ofSeconds(2).toMillis());
+      assertFalse(sender.isAlive(), "sender blocked on the full mailbox was never released");
+      awaitTerminated(child.get(), Duration.ofSeconds(2));
+    }
+  }
+
+  /**
+   * Regression test for #49: a stop requested mid-replay must take effect after the record being
+   * processed, not after the whole journal has been replayed.
+   */
+  @Test
+  void aStopRequestedDuringReplayTakesEffectAfterTheCurrentRecord() throws InterruptedException {
+    StringCodec codec = new StringCodec();
+    int recordCount = 100;
+    byte[][] seed = new byte[recordCount][];
+    for (int i = 0; i < recordCount; i++) {
+      seed[i] = codec.encode("r" + i);
+    }
+    RecordingJournal journal = new RecordingJournal(seed);
+    CountDownLatch firstRecordEntered = new CountDownLatch(1);
+    CountDownLatch proceed = new CountDownLatch(1);
+    AtomicInteger processed = new AtomicInteger();
+
+    try (ActorSystem system = ActorSystem.start("test")) {
+      ActorCell<String> cell =
+          new ActorCell<>(
+              system,
+              "long-replay",
+              () ->
+                  (context, message) -> {
+                    processed.incrementAndGet();
+                    firstRecordEntered.countDown();
+                    proceed.await();
+                  },
+              null,
+              SupervisorStrategy.stop(),
+              journal,
+              codec);
+      Thread dispatcherThread = new Thread(cell::run);
+      dispatcherThread.start();
+
+      assertTrue(firstRecordEntered.await(2, TimeUnit.SECONDS));
+      cell.requestStop();
+      proceed.countDown();
+
+      awaitTerminated(cell.ref(), Duration.ofSeconds(2));
+      dispatcherThread.join(Duration.ofSeconds(2).toMillis());
+      assertEquals(1, processed.get());
+    }
+  }
+
+  /**
+   * Regression test for #52: a journal opened for a persistent spawn must be closed if the actor
+   * can't be constructed (its factory throws), not leaked.
+   */
+  @Test
+  void aThrowingFactoryDoesNotLeakTheOpenedJournal() {
+    AtomicBoolean journalClosed = new AtomicBoolean(false);
+    Journal trackingJournal =
+        new Journal() {
+          @Override
+          public void append(byte[] record) {}
+
+          @Override
+          public List<byte[]> readAll() {
+            return List.of();
+          }
+
+          @Override
+          public void close() {
+            journalClosed.set(true);
+          }
+        };
+
+    try (ActorSystem system = ActorSystem.start("test", actorId -> trackingJournal)) {
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              system.spawn(
+                  () -> {
+                    throw new IllegalStateException("factory failed");
+                  },
+                  "throwing-factory",
+                  new StringCodec()));
+      assertTrue(journalClosed.get());
     }
   }
 
