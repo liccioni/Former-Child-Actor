@@ -119,8 +119,14 @@ public final class ActorSystem implements AutoCloseable {
           "Cannot spawn actor '" + name + "': ActorSystem '" + this.name + "' is shutting down");
     }
     Journal journal = store.open(name);
-    ActorCell<T> cell =
-        new ActorCell<>(this, name, factory, null, SupervisorStrategy.stop(), journal, codec);
+    ActorCell<T> cell;
+    try {
+      cell = new ActorCell<>(this, name, factory, null, SupervisorStrategy.stop(), journal, codec);
+    } catch (RuntimeException | Error e) {
+      // The factory threw while constructing the actor: don't leak the journal just opened (#52).
+      journal.close();
+      throw e;
+    }
     if (actors.putIfAbsent(name, cell) != null) {
       journal.close();
       throw new IllegalArgumentException("An actor named '" + name + "' already exists");
