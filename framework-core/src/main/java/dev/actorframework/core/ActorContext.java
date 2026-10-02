@@ -14,7 +14,7 @@ import java.util.function.Supplier;
  *
  * <p>Death watch (M6): an actor may watch any other actor in the same {@link ActorSystem} — not
  * only its own children — via {@link #watch}, to be notified when it terminates. See {@code
- * docs/decisions/ADR-016-death-watch.md} for full semantics.
+ * docs/decisions/ADR-017-death-watch.md} for full semantics.
  */
 public interface ActorContext<T> {
 

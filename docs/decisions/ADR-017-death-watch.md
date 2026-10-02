@@ -1,4 +1,4 @@
-# ADR-016: Death watch (M6)
+# ADR-017: Death watch (M6)
 
 * Status: Accepted
 * Written during: M6

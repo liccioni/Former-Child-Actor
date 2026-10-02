@@ -121,3 +121,17 @@ request a supervised `RESTART` silently dropped. The three-way split remains exa
 unobservable to `ask()`'s caller as it always was to `tell()`'s: `ask()` only ever distinguishes
 "known dead now" from "no reply yet," never *why* a rejection happened. No `Mailbox` change was
 needed. See `docs/decisions/ADR-015-ask-pattern.md` for the full design.
+
+## Resolved at TASK-601 (ADR-016)
+
+TASK-601 added a durable per-actor journal that replays messages via `onMessage` on spawn — a
+second path, besides live mailbox delivery, that this ADR's "processed at most once, never
+redelivered" guarantee had to be checked against. **It holds unchanged.** A journaled message
+throwing again during replay is handled by the exact same `SupervisorStrategy` consultation as a
+live failure, on the same code path; under `Restart` the failing record is consumed exactly once
+from the replay iterator before `onMessage` runs, the same dequeue-before-processing discipline
+`Mailbox.take()` already established for live messages (see this ADR's own "Resolved at
+TASK-402" section, above). A truly poison journaled message is a new, explicitly accepted
+limitation this ADR did not previously need to name: it fails identically on every future recovery
+attempt, since nothing removes it from the journal — TASK-602's snapshotting is the intended future
+lever. See `docs/decisions/ADR-016-durable-actor-journal-and-recovery.md` for the full design.

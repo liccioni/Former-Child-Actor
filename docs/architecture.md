@@ -1,6 +1,7 @@
 # Architecture
 
-Status: living document, updated as milestones land. Current milestone: **M6 — Death Watch**.
+Status: living document, updated as milestones land. Current milestone: **M6 — Death Watch &
+Persistence**.
 
 ## 1. Actor model
 
@@ -181,7 +182,31 @@ actor's own dispatcher thread. Touching that actor's own state from such a callb
 the single-thread-per-actor guarantee (§3); the safe pattern is to pipe the result back via
 `self.tell(...)` and only act on it from `onMessage`.
 
-## 10. Death watch (M6)
+## 10. Persistence (M6)
+
+An actor opts into durable, per-actor journaling by being spawned through
+`ActorSystem.spawn(factory, name, codec)` — a `MessageCodec<T>` argument is what makes the actor
+persistent — on a system started with `ActorSystem.start(name, store)`. Existing `spawn(factory)`/
+`spawn(factory, name)` are unaffected; a non-persistent actor never touches a journal.
+
+On spawn, a persistent actor's journal (if it has one from a previous run) is replayed via
+`onMessage` before any live message is processed, reconstructing its history. Every live message
+is durably appended to the journal *before* `onMessage` runs (write-ahead): it survives a process
+restart even if processing is interrupted mid-message. Replay and live processing are one
+dispatch loop, not two, so every `SupervisorStrategy` directive (§7) and the poison-message
+guarantee (§7, ADR-004) apply identically to a replayed message as to a live one — including the
+accepted limitation that a truly poison *journaled* message halts recovery identically on every
+future attempt, since nothing removes it from the journal (TASK-602's future snapshotting is the
+intended lever for bounding this).
+
+`JournalStore`/`Journal` are a pluggable, byte-level storage abstraction (`JournalStore.open`
+returns a `Journal` of `append`/`readAll`); `MessageCodec<T>` is the only place serialization is
+decided. `JournalStore.fileBacked(Path root)` is the local, file-backed default: one
+length-prefixed record file per actor id under an explicit `root` — no implicit default directory
+(§8's "explicit behavior"). See `docs/decisions/ADR-016-durable-actor-journal-and-recovery.md`
+for the full design.
+
+## 11. Death watch (M6)
 
 `ActorContext.watch(target, onTerminated)` lets any actor — not only a parent watching its own
 child — be notified when another actor in the same `ActorSystem` terminates. `onTerminated` is an
@@ -194,7 +219,7 @@ A `Restart` never fires a watch — the actor's identity survives a restart unto
 reuses `tell()`'s existing contract, including its silent-drop-if-the-recipient-has-already-stopped
 behavior: an actor watching itself never actually receives the notification, since its own mailbox
 is already closed by the time it finishes terminating, but it still terminates cleanly. See
-`docs/decisions/ADR-016-death-watch.md` for the full semantics, including the exactly-once
+`docs/decisions/ADR-017-death-watch.md` for the full semantics, including the exactly-once
 delivery mechanism and the actor-id-reuse hazard `watch`/`unwatch` guard against.
 
 ## Roadmap

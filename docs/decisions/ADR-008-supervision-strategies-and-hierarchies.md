@@ -141,3 +141,16 @@ thread needs no new synchronization.
   behavior is unchanged.
 * Any future change to the failure-handling default, hierarchy semantics, or either deliberately
   deferred item above must engage with this ADR explicitly, per `AGENTS.md`'s ADR-gate list.
+
+## Resolved at TASK-601 (ADR-016)
+
+TASK-601 added journal replay via `onMessage`, a second source of messages besides the mailbox
+that every `SupervisorStrategy` directive had to be checked against. **No change was needed.**
+`Restart` replaces the actor instance and re-runs `preStart` exactly as it already did for a live
+failure; the dispatch loop then moves on to the next replayed record or mailbox message regardless
+of which directive the previous failure resolved to — the failing record is never redelivered,
+mirroring how a live poison message is never redelivered (ADR-004's own addendum, above). See
+`docs/decisions/ADR-016-durable-actor-journal-and-recovery.md` for the full design, including the
+one genuinely new case supervision now has to reckon with: a *journaled* poison message under
+`stop()`, which halts recovery at that record identically on every future attempt — an accepted
+limitation, not a supervision change.

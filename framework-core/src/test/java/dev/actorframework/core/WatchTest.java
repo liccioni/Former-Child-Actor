@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * M6: death watch ({@link ActorContext#watch}/{@link ActorContext#unwatch}). See {@code
- * docs/decisions/ADR-016-death-watch.md} for the full semantics this exercises: exactly-once
+ * docs/decisions/ADR-017-death-watch.md} for the full semantics this exercises: exactly-once
  * delivery (including races between a late watch and the target's own concurrent termination),
  * {@code Restart} never firing a watch, cascaded/escalated stops still firing it, and the
  * actor-id-reuse hazard {@code ActorSystem.watch}/{@code unwatch} guard against by ref identity.
